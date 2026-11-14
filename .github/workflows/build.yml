@@ -20,18 +20,26 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git qt6-base qt6-declarative qt6-svg qt6-wayland pam-u2f libfido2 polkit namcap ttf-dejavu
           useradd --create-home builder
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Build and test as an unprivileged user
         run: |
-          cp -a . /home/builder/keymarchy
-          chown -R builder:builder /home/builder/keymarchy
-          runuser -u builder -- bash -c 'cd /home/builder/keymarchy/pkgbuild && makepkg --noconfirm'
+          version=$(sed -n 's/^pkgver=//p' pkgbuild/PKGBUILD)
+          mkdir -p /home/builder/package
+          archive="keymarchy-$version.tar.gz"
+          git archive --prefix="keymarchy-$version/" HEAD | gzip -n > "/home/builder/package/$archive"
+          checksum=$(sha256sum "/home/builder/package/$archive" | cut -d ' ' -f 1)
+          cp pkgbuild/PKGBUILD /home/builder/package/PKGBUILD
+          sed -i 's|\$startdir/..|$srcdir/$pkgname-$pkgver|g; s|source=()|source=("$pkgname-$pkgver.tar.gz")|' /home/builder/package/PKGBUILD
+          sed -i "s/sha256sums=()/sha256sums=('$checksum')/" /home/builder/package/PKGBUILD
+          chown -R builder:builder /home/builder/package
+          runuser -u builder -- bash -c 'cd /home/builder/package && makepkg --noconfirm'
       - name: Inspect package
         run: |
-          cd /home/builder/keymarchy/pkgbuild
-          namcap PKGBUILD keymarchy-*.pkg.tar.zst
+          cd /home/builder/package
+          namcap PKGBUILD keymarchy-*.pkg.tar.zst | tee /tmp/namcap.log
+          if grep -q ' E: ' /tmp/namcap.log; then exit 1; fi
           pacman -U --noconfirm keymarchy-*.pkg.tar.zst
           keymarchy --help
           test -f /usr/share/applications/keymarchy.desktop
