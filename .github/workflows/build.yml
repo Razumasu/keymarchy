@@ -1,0 +1,38 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arch:
+    name: Arch Linux package
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Prepare Arch Linux
+        run: |
+          pacman -Syu --noconfirm --needed git qt6-base qt6-declarative qt6-wayland pam-u2f libfido2 polkit namcap
+          useradd --create-home builder
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and test as an unprivileged user
+        run: |
+          cp -a . /home/builder/keymarchy
+          chown -R builder:builder /home/builder/keymarchy
+          runuser -u builder -- bash -c 'cd /home/builder/keymarchy/pkgbuild && makepkg --noconfirm'
+      - name: Inspect package
+        run: |
+          cd /home/builder/keymarchy/pkgbuild
+          namcap PKGBUILD keymarchy-*.pkg.tar.zst
+          pacman -U --noconfirm keymarchy-*.pkg.tar.zst
+          keymarchy --help
+          test -f /usr/share/applications/keymarchy.desktop
+          test -f /usr/share/icons/hicolor/scalable/apps/keymarchy.svg

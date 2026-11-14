@@ -8,9 +8,11 @@ remove a selected registration without manually editing authentication files.
 
 ## Install
 
-On Omarchy, from a checkout or extracted source archive:
+On Omarchy, clone the project and build the package:
 
 ```sh
+git clone https://github.com/Razumasu/keymarchy.git
+cd keymarchy
 ./bin/install
 ```
 
@@ -19,6 +21,12 @@ launcher (`Super + Space`), or run `keymarchy open`.
 
 Dependencies: Qt 6 base, declarative and Wayland, pam-u2f, libfido2, and polkit.
 Building needs GCC, make, and qmake6. The PKGBUILD is in `pkgbuild/`.
+Source archives are available on the [releases page](https://github.com/Razumasu/keymarchy/releases).
+Extract an archive and run `./bin/install` inside it to install a specific release.
+This installation does not enable FIDO2 or change your PAM configuration.
+
+AUR and Omarchy repository submissions are being prepared. Until they are
+accepted and published, use the source installation above.
 
 ## Use
 
@@ -145,3 +153,5 @@ The security key integration uses [Yubico's pam-u2f](https://developers.yubico.c
 Atomic name storage uses [Qt QSaveFile](https://doc.qt.io/qt-6/qsavefile.html).
 Theme and translation templates are adapted from the Omarchy app conventions
 (MIT, David Heinemeier Hansson).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and release steps.
