@@ -26,8 +26,9 @@ Source archives are available on the [releases page](https://github.com/Razumasu
 Extract an archive and run `./bin/install` inside it to install a specific release.
 This installation does not enable FIDO2 or change your PAM configuration.
 
-AUR and Omarchy repository submissions are being prepared. Until they are
-accepted and published, use the source installation above.
+The [Omarchy package submission](https://github.com/omacom/omarchy-pkgs/pull/2776)
+is pending review. The AUR package is not published yet. Until the packages are
+available, use the source installation above.
 
 ## Use
 
