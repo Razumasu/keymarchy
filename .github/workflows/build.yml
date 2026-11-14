@@ -15,14 +15,21 @@ jobs:
     name: Arch Linux package
     runs-on: ubuntu-latest
     container: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Prepare Arch Linux
         run: |
-          pacman -Syu --noconfirm --needed git qt6-base qt6-declarative qt6-svg qt6-wayland pam-u2f libfido2 polkit namcap ttf-dejavu
+          pacman -Syu --noconfirm --needed git namcap
           useradd --create-home builder
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install declared dependencies
+        run: |
+          source pkgbuild/PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"
       - name: Build and test as an unprivileged user
         run: |
           version=$(sed -n 's/^pkgver=//p' pkgbuild/PKGBUILD)
