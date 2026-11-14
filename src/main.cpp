@@ -1,0 +1,87 @@
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickStyle>
+#include <QQuickWindow>
+#include <QIcon>
+#include <QTextStream>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QTimer>
+#include <QSaveFile>
+#include <QDir>
+#include "backend.h"
+#include "registry.h"
+#include "theme.h"
+#include "translator.h"
+
+int main(int argc, char **argv) {
+    QStringList args;
+    for (int i = 1; i < argc; ++i) args << QString::fromLocal8Bit(argv[i]);
+    if (args == QStringList{"--helper"}) { QCoreApplication app(argc,argv); return runHelper(); }
+    const bool gui = args.isEmpty() || args.first() == "open" || args.first() == "--preview";
+    if (!gui) { qputenv("QT_QPA_PLATFORM", "offscreen"); qputenv("QT_QPA_PLATFORMTHEME", "basic"); }
+    QGuiApplication app(argc,argv);
+    app.setApplicationName("keykeep"); app.setApplicationVersion("0.1.0");
+    app.setDesktopFileName("keykeep"); app.setWindowIcon(QIcon::fromTheme("keykeep"));
+    QQuickStyle::setStyle("Material");
+    Translator translator; app.installTranslator(&translator);
+    if (args == QStringList{"skill","install"}) {
+        const QString dir = QDir::homePath() + "/.agents/skills/keykeep";
+        try {
+            if (!QDir().mkpath(dir)) throw Failure("Cannot create skill directory.");
+            QSaveFile f(dir + "/SKILL.md"); const auto bytes = readFile(":/SKILL.md");
+            if (!f.open(QIODevice::WriteOnly) || f.write(bytes) != bytes.size() || !f.commit()) throw Failure("Cannot install skill.");
+            QTextStream(stdout) << "Installed " << dir << "/SKILL.md\n"; return 0;
+        } catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
+    }
+    if (args.contains("--help") || args.contains("-h")) {
+        QTextStream(stdout) << "Keykeep 0.1.0 — security keys for Omarchy\n"
+            "  keykeep open\n  keykeep list [--json]\n  keykeep add NAME [--json]\n"
+            "  keykeep rename ID NAME [--json]\n  keykeep remove ID --yes [--json]\n"
+            "  keykeep skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";
+        return 0;
+    }
+    const bool preview = args.value(0) == "--preview";
+    Backend backend(preview);
+    if (!gui) {
+        const bool json = args.removeAll("--json") > 0;
+        const auto command = args.value(0);
+        if (command == "list" && args.size() == 1) {
+            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"keys",QJsonArray::fromVariantList(backend.keys())},{"problem",backend.problem()}}).toJson();
+            else for (const auto &item : backend.keys()) { const auto key=item.toMap(); QTextStream(stdout) << key.value("id").toString() << "  " << key.value("name").toString() << '\n'; }
+            if (!backend.problem().isEmpty()) { QTextStream(stderr) << backend.problem() << '\n'; return 1; }
+            return 0;
+        }
+        QObject::connect(&backend,&Backend::completed,&app,[&](bool success) {
+            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"ok",success},{"message",backend.message()}}).toJson(QJsonDocument::Compact) << '\n';
+            else QTextStream(success ? stdout : stderr) << backend.message() << '\n';
+            if (json && !success) QTextStream(stderr) << backend.message() << '\n';
+            app.exit(success ? 0 : 1);
+        });
+        QObject::connect(&backend,&Backend::changed,&app,[&] { if (backend.busy()) QTextStream(stderr) << backend.message() << '\n'; });
+        QTimer::singleShot(0,&app,[&] {
+            if (command == "add" && args.size() == 2) backend.add(args[1]);
+            else if (command == "rename" && args.size() == 3) backend.rename(args[1],args[2]);
+            else if (command == "remove" && args.size() == 3 && args[2] == "--yes") backend.remove(args[1]);
+            else { QTextStream(stderr) << "Invalid arguments. Run keykeep --help. Removal requires --yes.\n"; app.exit(1); }
+        });
+        return app.exec();
+    }
+    Theme theme(preview ? "/nonexistent-keykeep-preview" : QString());
+    QQmlApplicationEngine engine;
+    QObject::connect(&translator,&Translator::changed,&engine,&QQmlEngine::retranslate);
+    QObject::connect(&translator,&Translator::changed,&backend,&Backend::refresh);
+    engine.rootContext()->setContextProperty("backend",&backend);
+    engine.rootContext()->setContextProperty("theme",&theme);
+    engine.rootContext()->setContextProperty("translator",&translator);
+    engine.load(QUrl("qrc:/Main.qml"));
+    if (engine.rootObjects().isEmpty()) return 1;
+    if (preview && args.size() == 2) {
+        QTimer::singleShot(1000,&app,[&] {
+            auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+            app.exit(window && window->grabWindow().save(args[1]) ? 0 : 1);
+        });
+    }
+    return app.exec();
+}

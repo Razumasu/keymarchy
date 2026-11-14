@@ -1,0 +1,163 @@
+#include <QtTest>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickWindow>
+#include <QQuickItem>
+#include <QQuickStyle>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/file.h>
+#include <fcntl.h>
+#include "registry.h"
+#include "store.h"
+#include "backend.h"
+#include "theme.h"
+#include "translator.h"
+
+const QByteArray one = "aGVsbG8=,cHVibGlj,es256,+presence";
+const QByteArray two = "d29ybGQ=,cHVibGlj,es256,+presence";
+const QByteArray three = "dGhpcmQ=,cHVibGlj,es256,+presence";
+class KeykeepTests : public QObject {
+    Q_OBJECT
+    static void write(const QString &path, const QByteArray &data) {
+        QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size());
+    }
+    static QJsonObject request(const QByteArray &data, const QString &action, const QByteArray &credential = three) {
+        return {{"revision",Registry::fingerprint(data)},{"action",action},{"credential",QString::fromLatin1(credential)}};
+    }
+private slots:
+    void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void preservesOtherUsersAndExistingKeys() {
+        const auto data = "# mapping\nother:" + three + "\nalice:" + one + ':' + two + "\n";
+        Registry r(data,"alice"); const auto updated = r.add(three);
+        QVERIFY(updated.startsWith("# mapping\nother:" + three + '\n'));
+        Registry next(updated,"alice"); QCOMPARE(next.keys().size(),3);
+        QCOMPARE(next.remove(Registry::fingerprint(three)),data);
+    }
+    void removesOnlySelectedKey() {
+        Registry r("alice:"+one+':'+two+':'+three+"\n", "alice");
+        Registry next(r.remove(Registry::fingerprint(two)),"alice");
+        QCOMPARE(next.keys().size(),2); QCOMPARE(next.keys()[0].credential,one); QCOMPARE(next.keys()[1].credential,three);
+        QVERIFY_EXCEPTION_THROWN(r.remove("missing"),Failure);
+    }
+    void lastKeyAndFirstKey() {
+        Registry r("alice:"+one+"\n", "alice");
+        QCOMPARE(r.remove(Registry::fingerprint(one)),QByteArray("alice:\n"));
+        Registry empty("alice:\n","alice"); QCOMPARE(empty.add(one),QByteArray("alice:"+one+"\n"));
+        Registry absent("other:"+two,"alice");
+        QCOMPARE(Registry(absent.add(one),"alice").keys().size(),1);
+    }
+    void refusesMalformedOrAmbiguousRecords() {
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:"+one+"\nalice:"+two,"alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:"+one+':'+one,"alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:bad","alice"),Failure);
+        Registry r("alice:"+one,"alice");
+        QVERIFY_EXCEPTION_THROWN(r.add(two+"\nroot:"+three),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add(one),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("","bad:name"),Failure);
+    }
+    void supportsLegacyRecords() { Registry r("alice:0123abcd,4567efab\n","alice"); QCOMPARE(r.keys().size(),1); }
+    void enforcesLimit() {
+        Registry r("alice:\n","alice"); QByteArray data;
+        for (int i=0;i<24;++i) { data=r.add(QByteArray::number(i)+",abcdef,es256,+presence"); r=Registry(data,"alice"); }
+        QVERIFY_EXCEPTION_THROWN(r.add(three),Failure);
+    }
+    void savesBackupAndPermissions() {
+        QTemporaryDir dir; const auto original="alice:"+one+':'+two+"\n";
+        write(dir.filePath("fido2"),original);
+        const auto result=applyRegistration(dir.path(),getuid(),"alice",request(original,"add"));
+        QCOMPARE(readFile(result.value("backup").toString()),original);
+        const auto saved=readFile(dir.filePath("fido2")); QCOMPARE(Registry(saved,"alice").keys().size(),3);
+        struct stat st{}; QVERIFY(stat(QFile::encodeName(dir.filePath("fido2")).constData(),&st)==0); QCOMPARE(st.st_mode & 0777,mode_t(0644));
+        QVERIFY(stat(QFile::encodeName(result.value("backup").toString()).constData(),&st)==0); QCOMPARE(st.st_mode & 0777,mode_t(0600));
+        auto rm=request(saved,"remove"); rm.insert("id",Registry::fingerprint(three));
+        applyRegistration(dir.path(),getuid(),"alice",rm);
+        QCOMPARE(readFile(dir.filePath("fido2")),original);
+    }
+    void refusesStaleRevisions() {
+        QTemporaryDir dir; auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
+        auto req=request(original,"add"); req.insert("revision","stale");
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",req),Failure);
+        QCOMPARE(readFile(dir.filePath("fido2")),original);
+    }
+    void rejectsSymlinkAndWritableFiles() {
+        QTemporaryDir dir; auto original="alice:"+one+"\n"; write(dir.filePath("real"),original);
+        QVERIFY(QFile::link(dir.filePath("real"),dir.filePath("fido2")));
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add")),Failure);
+        QFile::remove(dir.filePath("fido2")); write(dir.filePath("fido2"),original);
+        QVERIFY(QFile::setPermissions(dir.filePath("fido2"), QFile::ReadOwner|QFile::WriteOwner|QFile::WriteOther));
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add")),Failure);
+    }
+    void cannotChangeOtherUserViaRequest() {
+        QTemporaryDir dir; auto original="alice:"+one+"\nother:"+two+"\n"; write(dir.filePath("fido2"),original);
+        auto req=request(original,"remove"); req.insert("id",Registry::fingerprint(two)); req.insert("user","other");
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",req),Failure);
+        QCOMPARE(readFile(dir.filePath("fido2")),original);
+    }
+    void rejectsHardLinksAndDirectorySymlinks() {
+        QTemporaryDir dir; QDir(dir.path()).mkdir("safe");
+        const auto data="alice:"+one+"\n";
+        const auto target=dir.filePath("safe/fido2"); write(target,data);
+        QVERIFY(::link(QFile::encodeName(target).constData(),QFile::encodeName(dir.filePath("copy")).constData())==0);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("safe"),getuid(),"alice",request(data,"add")),Failure);
+        QFile::remove(dir.filePath("copy"));
+        QVERIFY(QFile::link(dir.filePath("safe"),dir.filePath("alias")));
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("alias"),getuid(),"alice",request(data,"add")),Failure);
+    }
+    void refusesConcurrentWriters() {
+        QTemporaryDir dir; const auto data="alice:"+one+"\n"; write(dir.filePath("fido2"),data);
+        const int fd=open(QFile::encodeName(dir.filePath(".keykeep.lock")).constData(),O_RDWR|O_CREAT,0600);
+        QVERIFY(fd>=0); QVERIFY(flock(fd,LOCK_EX|LOCK_NB)==0);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(data,"add")),Failure);
+        close(fd); QCOMPARE(readFile(dir.filePath("fido2")),data);
+    }
+    void validatesNames() {
+        QCOMPARE(Backend::validateName("  Backup  "),QString("Backup"));
+        QVERIFY_EXCEPTION_THROWN(Backend::validateName("\n"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Backend::validateName("key\nname"),Failure);
+    }
+    void themeAndLanguage() {
+        QTemporaryDir dir; QDir(dir.path()).mkdir("theme"); write(dir.filePath("theme/colors.toml"),"accent = '#112233'\n");
+        Theme theme(dir.path()); QCOMPARE(theme.accent(),QString("#112233"));
+        write(dir.filePath("language"),"da\n"); Translator t(dir.filePath("language"));
+        QCOMPARE(t.translate("Main","Add key"),QString::fromUtf8("Tilføj nøgle"));
+    }
+    void realWindowDialogsAndTranslation() {
+        QTemporaryDir dir; write(dir.filePath("language"),"en\n");
+        Theme theme(dir.path()); Translator translator(dir.filePath("language")); qApp->installTranslator(&translator);
+        Backend backend(true); QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("backend",&backend);
+        engine.rootContext()->setContextProperty("theme",&theme);
+        engine.rootContext()->setContextProperty("translator",&translator);
+        connect(&translator,&Translator::changed,&engine,&QQmlEngine::retranslate);
+        QSignalSpy warnings(&engine,&QQmlEngine::warnings);
+        engine.load(QUrl("qrc:/Main.qml")); QVERIFY(!engine.rootObjects().isEmpty());
+        auto *win=qobject_cast<QQuickWindow*>(engine.rootObjects().first()); QVERIFY(win);
+        QTest::qWait(150);
+        auto *button=win->findChild<QQuickItem*>("addButton"); QVERIFY(button);
+        const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
+        QTest::mouseClick(win,Qt::LeftButton,Qt::NoModifier,point);
+        auto *dialog=win->findChild<QObject*>("nameDialog"); QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        auto *field=win->findChild<QObject*>("nameField"); QVERIFY(field);
+        field->setProperty("text","Query key");
+        QTest::keyClick(win,Qt::Key_Q); QVERIFY(win->isVisible());
+        QMetaObject::invokeMethod(dialog,"reject");
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        auto *list=win->findChild<QObject*>("keyList"); QVERIFY(list); list->setProperty("currentIndex",0);
+        QTest::keyClick(win,Qt::Key_Delete);
+        auto *remove=win->findChild<QObject*>("removeDialog"); QVERIFY(remove);
+        QTRY_VERIFY(remove->property("visible").toBool()); QMetaObject::invokeMethod(remove,"reject");
+        write(dir.filePath("language"),"da\n");
+        QTRY_COMPARE(translator.language(),QString("da"));
+        QTRY_COMPARE(button->property("text").toString(),QString::fromUtf8("Tilføj nøgle"));
+        QTest::qWait(300);
+        QVERIFY(win->grabWindow().save(QDir::current().filePath("danish-preview.png")));
+        QCOMPARE(warnings.count(),0);
+        qApp->removeTranslator(&translator);
+    }
+};
+QTEST_MAIN(KeykeepTests)
+#include "keykeep_tests.moc"

@@ -1,0 +1,28 @@
+pkgname=keykeep
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Manage named FIDO2 security keys for sudo on Omarchy'
+arch=('x86_64' 'aarch64')
+license=('MIT')
+options=('!debug')
+depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'pam-u2f' 'libfido2' 'polkit')
+makedepends=('gcc' 'make')
+source=()
+sha256sums=()
+build() {
+  cd "$startdir/.."
+  ./bin/build
+}
+check() {
+  cd "$startdir/.."
+  ./bin/test
+}
+package() {
+  cd "$startdir/.."
+  install -Dm755 build/keykeep "$pkgdir/usr/bin/keykeep"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/keykeep/LICENSE"
+  install -Dm644 pkgbuild/keykeep.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/keykeep.svg"
+  install -Dm644 pkgbuild/keykeep.desktop "$pkgdir/usr/share/applications/keykeep.desktop"
+  install -Dm644 docs/screenshot.png "$pkgdir/usr/share/doc/keykeep/docs/screenshot.png"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/keykeep/README.md"
+}
