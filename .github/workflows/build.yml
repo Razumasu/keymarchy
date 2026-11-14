@@ -35,7 +35,7 @@ jobs:
           version=$(sed -n 's/^pkgver=//p' pkgbuild/PKGBUILD)
           mkdir -p /home/builder/package
           archive="keymarchy-$version.tar.gz"
-          git archive --prefix="keymarchy-$version/" HEAD | gzip -n > "/home/builder/package/$archive"
+          git -c safe.directory="$GITHUB_WORKSPACE" archive --prefix="keymarchy-$version/" HEAD | gzip -n > "/home/builder/package/$archive"
           checksum=$(sha256sum "/home/builder/package/$archive" | cut -d ' ' -f 1)
           cp pkgbuild/PKGBUILD /home/builder/package/PKGBUILD
           sed -i 's|\$startdir/..|$srcdir/$pkgname-$pkgver|g; s|source=()|source=("$pkgname-$pkgver.tar.gz")|' /home/builder/package/PKGBUILD
