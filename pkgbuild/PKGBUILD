@@ -6,8 +6,11 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/Razumasu/keymarchy'
 license=('MIT')
 options=('!debug')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'pam-u2f' 'libfido2' 'polkit')
-makedepends=('gcc' 'make')
+depends=('gcc-libs' 'glibc' 'hicolor-icon-theme' 'libglvnd' 'openssl'
+         'qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland'
+         'pam-u2f' 'libfido2' 'polkit')
+makedepends=('gcc' 'make' 'pkgconf')
+checkdepends=('ttf-dejavu')
 source=()
 sha256sums=()
 build() {

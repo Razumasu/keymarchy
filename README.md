@@ -19,8 +19,9 @@ cd keymarchy
 This builds, tests, and installs an Arch package. Open **Keymarchy** in the app
 launcher (`Super + Space`), or run `keymarchy open`.
 
-Dependencies: Qt 6 base, declarative and Wayland, pam-u2f, libfido2, and polkit.
-Building needs GCC, make, and qmake6. The PKGBUILD is in `pkgbuild/`.
+Dependencies include Qt 6 base, declarative, SVG and Wayland, pam-u2f,
+libfido2, and polkit. Building needs GCC, make, pkgconf, and qmake6.
+The PKGBUILD in `pkgbuild/` lists all runtime, build, and test dependencies.
 Source archives are available on the [releases page](https://github.com/Razumasu/keymarchy/releases).
 Extract an archive and run `./bin/install` inside it to install a specific release.
 This installation does not enable FIDO2 or change your PAM configuration.

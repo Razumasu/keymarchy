@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Prepare Arch Linux
         run: |
-          pacman -Syu --noconfirm --needed git qt6-base qt6-declarative qt6-wayland pam-u2f libfido2 polkit namcap
+          pacman -Syu --noconfirm --needed git qt6-base qt6-declarative qt6-svg qt6-wayland pam-u2f libfido2 polkit namcap ttf-dejavu
           useradd --create-home builder
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
