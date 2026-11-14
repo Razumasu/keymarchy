@@ -29,6 +29,7 @@ public:
     Q_INVOKABLE void remove(const QString &id);
     Q_INVOKABLE void rename(const QString &id, const QString &name);
     Q_INVOKABLE void cancel();
+    static QString labelReadPath(const QString &current, const QString &legacy);
     static QString validateName(const QString &name);
 signals:
     void changed();

@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=Keykeep
-Name[da]=Keykeep
+Name=Keymarchy
+Name[da]=Keymarchy
 Comment=Manage security keys for sudo on Omarchy
 Comment[da]=Administrer sikkerhedsnøgler til sudo på Omarchy
-Exec=keykeep open
-Icon=keykeep
+Exec=keymarchy open
+Icon=keymarchy
 Terminal=false
 Categories=System;Security;
 Keywords=YubiKey;FIDO2;sudo;security;keys;
-StartupWMClass=keykeep
+StartupWMClass=keymarchy

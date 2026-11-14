@@ -28,12 +28,12 @@ int main(int argc, char **argv) {
     const bool gui = args.isEmpty() || args.first() == "open" || args.first() == "--preview";
     if (!gui) { qputenv("QT_QPA_PLATFORM", "offscreen"); qputenv("QT_QPA_PLATFORMTHEME", "basic"); }
     QGuiApplication app(argc,argv);
-    app.setApplicationName("keykeep"); app.setApplicationVersion("0.2.0");
-    app.setDesktopFileName("keykeep"); app.setWindowIcon(QIcon::fromTheme("keykeep"));
+    app.setApplicationName("keymarchy"); app.setApplicationVersion("0.3.0");
+    app.setDesktopFileName("keymarchy"); app.setWindowIcon(QIcon::fromTheme("keymarchy"));
     QQuickStyle::setStyle("Material");
     Translator translator; app.installTranslator(&translator);
     if (args == QStringList{"skill","install"}) {
-        const QString dir = QDir::homePath() + "/.agents/skills/keykeep";
+        const QString dir = QDir::homePath() + "/.agents/skills/keymarchy";
         try {
             if (!QDir().mkpath(dir)) throw Failure("Cannot create skill directory.");
             QSaveFile f(dir + "/SKILL.md"); const auto bytes = readFile(":/SKILL.md");
@@ -42,10 +42,10 @@ int main(int argc, char **argv) {
         } catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
     }
     if (args.contains("--help") || args.contains("-h")) {
-        QTextStream(stdout) << "Keykeep 0.2.0 — security keys for Omarchy\n"
-            "  keykeep open\n  keykeep list [--json]\n  keykeep add NAME [--json]\n"
-            "  keykeep rename ID NAME [--json]\n  keykeep remove ID --yes [--json]\n"
-            "  keykeep skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";
+        QTextStream(stdout) << "Keymarchy 0.3.0 — security keys for Omarchy\n"
+            "  keymarchy open\n  keymarchy list [--json]\n  keymarchy add NAME [--json]\n"
+            "  keymarchy rename ID NAME [--json]\n  keymarchy remove ID --yes [--json]\n"
+            "  keymarchy skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";
         return 0;
     }
     const bool preview = args.value(0) == "--preview";
@@ -77,12 +77,12 @@ int main(int argc, char **argv) {
             if (command == "add" && args.size() == 2) backend.add(args[1]);
             else if (command == "rename" && args.size() == 3) backend.rename(args[1],args[2]);
             else if (command == "remove" && args.size() == 3 && args[2] == "--yes") backend.remove(args[1]);
-            else { QTextStream(stderr) << "Invalid arguments. Run keykeep --help. Removal requires --yes.\n"; app.exit(1); }
+            else { QTextStream(stderr) << "Invalid arguments. Run keymarchy --help. Removal requires --yes.\n"; app.exit(1); }
         });
         return app.exec();
     }
     if (!preview) backend.startMonitoring();
-    Theme theme(preview ? "/nonexistent-keykeep-preview" : QString());
+    Theme theme(preview ? "/nonexistent-keymarchy-preview" : QString());
     QQmlApplicationEngine engine;
     QObject::connect(&translator,&Translator::changed,&engine,&QQmlEngine::retranslate);
     QObject::connect(&translator,&Translator::changed,&backend,&Backend::refresh);

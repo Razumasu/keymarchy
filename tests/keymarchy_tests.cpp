@@ -20,7 +20,7 @@
 const QByteArray one = "aGVsbG8=,cHVibGlj,es256,+presence";
 const QByteArray two = "d29ybGQ=,cHVibGlj,es256,+presence";
 const QByteArray three = "dGhpcmQ=,cHVibGlj,es256,+presence";
-class KeykeepTests : public QObject {
+class KeymarchyTests : public QObject {
     Q_OBJECT
     static void write(const QString &path, const QByteArray &data) {
         QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size());
@@ -156,6 +156,16 @@ private slots:
         const auto failed=applyPresence(mapped,{});
         for (const auto &row:failed) QCOMPARE(row.toMap().value("connection").toString(),QString("unknown"));
     }
+    void preservesLegacyNamesAfterRename() {
+        QTemporaryDir dir;
+        const auto legacy=dir.filePath("legacy-labels.json"), current=dir.filePath("labels.json");
+        QCOMPARE(Backend::labelReadPath(current,legacy),QString());
+        write(legacy,R"({"id":"My backup"})");
+        QCOMPARE(Backend::labelReadPath(current,legacy),legacy);
+        write(current,R"({"id":"My everyday key"})");
+        QCOMPARE(Backend::labelReadPath(current,legacy),current);
+        QCOMPARE(readFile(legacy),QByteArray(R"({"id":"My backup"})"));
+    }
     void validatesNames() {
         QCOMPARE(Backend::validateName("  Backup  "),QString("Backup"));
         QVERIFY_EXCEPTION_THROWN(Backend::validateName("\n"),Failure);
@@ -209,5 +219,5 @@ private slots:
         qApp->removeTranslator(&translator);
     }
 };
-QTEST_MAIN(KeykeepTests)
-#include "keykeep_tests.moc"
+QTEST_MAIN(KeymarchyTests)
+#include "keymarchy_tests.moc"

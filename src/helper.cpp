@@ -19,7 +19,7 @@ int runHelper() {
         if (geteuid() != 0) throw Failure(appText("Administrator authentication is required."));
         bool ok = false;
         const uint uid = qEnvironmentVariable("PKEXEC_UID").toUInt(&ok);
-        if (!ok || uid == 0) throw Failure(appText("Use Keykeep as a regular user through pkexec."));
+        if (!ok || uid == 0) throw Failure(appText("Use Keymarchy as a regular user through pkexec."));
         const auto *pw = getpwuid(uid);
         if (!pw) throw Failure(appText("Cannot identify the requesting user."));
         const QString user = QString::fromLocal8Bit(pw->pw_name);

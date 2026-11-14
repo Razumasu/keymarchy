@@ -1,6 +1,6 @@
-![Keykeep showing three named security keys](docs/screenshot.png)
+![Keymarchy showing three named security keys](docs/screenshot.png)
 
-# Keykeep
+# Keymarchy
 
 A small native app for managing the FIDO2 security keys used by sudo on Omarchy.
 List your registrations, give them memorable names, add a key with a touch, and
@@ -14,8 +14,8 @@ On Omarchy, from a checkout or extracted source archive:
 ./bin/install
 ```
 
-This builds, tests, and installs an Arch package. Open **Keykeep** in the app
-launcher (`Super + Space`), or run `keykeep open`.
+This builds, tests, and installs an Arch package. Open **Keymarchy** in the app
+launcher (`Super + Space`), or run `keymarchy open`.
 
 Dependencies: Qt 6 base, declarative and Wayland, pam-u2f, libfido2, and polkit.
 Building needs GCC, make, and qmake6. The PKGBUILD is in `pkgbuild/`.
@@ -32,9 +32,9 @@ Building needs GCC, make, and qmake6. The PKGBUILD is in `pkgbuild/`.
   leaves password authentication in place.
 - **Refresh:** reload registrations changed by another tool.
 
-Keykeep manages the standard Omarchy FIDO2 setup, using `/etc/fido2/fido2`.
+Keymarchy manages the standard Omarchy FIDO2 setup, using `/etc/fido2/fido2`.
 If FIDO2 has never been configured, first enroll a key through Omarchy's
-**Setup > Security > FIDO2** menu. Keykeep then manages additional keys.
+**Setup > Security > FIDO2** menu. Keymarchy then manages additional keys.
 Custom PAM origins, authfile paths, and pam-u2f defaults are currently rejected
 with an explanation, rather than guessed.
 
@@ -58,10 +58,10 @@ passkeys, SSH credentials, or any other data on the physical YubiKey.
 ## Command line
 
 ```sh
-keykeep list --json
-keykeep add "Backup at home" --json
-keykeep rename FULL_REGISTRATION_ID "Travel key" --json
-keykeep remove FULL_REGISTRATION_ID --yes --json
+keymarchy list --json
+keymarchy add "Backup at home" --json
+keymarchy rename FULL_REGISTRATION_ID "Travel key" --json
+keymarchy remove FULL_REGISTRATION_ID --yes --json
 ```
 
 The `list` output includes `connection` (`connected`, `disconnected`, or `unknown`)
@@ -70,8 +70,8 @@ addition or removal invokes `pkexec`, which may use a graphical authentication
 agent or a terminal prompt. Run as your regular user. Exit status is 0 on success,
 1 on failure. With `--json`, stdout contains JSON and progress/errors go to stderr.
 
-`keykeep skill install` installs the bundled agent instructions under
-`~/.agents/skills/keykeep/`.
+`keymarchy skill install` installs the bundled agent instructions under
+`~/.agents/skills/keymarchy/`.
 
 ## Keyboard
 
@@ -91,10 +91,10 @@ close the system authentication prompt to decline a save.
 
 ## Storage and recovery
 
-The GUI runs unprivileged. Only `/usr/bin/keykeep --helper`, launched through
+The GUI runs unprivileged. Only `/usr/bin/keymarchy --helper`, launched through
 `pkexec`, writes the registration file. It derives the requesting user from
 `PKEXEC_UID`, restricts edits to that user's row, checks ownership and file types,
-locks concurrent Keykeep changes, rejects stale revisions, and writes atomically.
+locks concurrent Keymarchy changes, rejects stale revisions, and writes atomically.
 It neither edits PAM nor grants new sudo privileges.
 
 Each successful addition or removal creates a root-only backup named
@@ -102,7 +102,10 @@ Each successful addition or removal creates a root-only backup named
 one restores the *entire* mapping file, including other users and keys, so an
 administrator should inspect it before replacing the current file.
 
-Names are stored separately in `~/.local/share/keykeep/labels.json`, keyed by
+Existing names from Keykeep are read automatically if no Keymarchy names file
+exists. The next name edit copies them into the new location.
+
+Names are stored separately in `~/.local/share/keymarchy/labels.json`, keyed by
 registration fingerprint. They are descriptive and have no authentication role.
 Removal keeps the label so restoring a registration also restores its name.
 There is no automatic undo of an authentication change.
@@ -129,7 +132,7 @@ Reference: [Yubico libfido2 assertions](https://developers.yubico.com/libfido2/M
 ./bin/build
 ./bin/test
 QT_QPA_PLATFORMTHEME=basic QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-  ./build/keykeep --preview docs/screenshot.png
+  ./build/keymarchy --preview docs/screenshot.png
 ```
 
 C++ owns registration parsing, processes, and disk operations. Qt Quick owns the

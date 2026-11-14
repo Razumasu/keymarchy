@@ -8,7 +8,7 @@ ApplicationWindow {
     width: 820; height: 670
     minimumWidth: 660; minimumHeight: 580
     visible: true
-    title: "Keykeep"
+    title: "Keymarchy"
     color: "#101214"
     Material.theme: Material.Dark
     Material.accent: theme.accent
@@ -50,7 +50,7 @@ ApplicationWindow {
                 }
                 ColumnLayout {
                     spacing: 2
-                    Label { text: "Keykeep"; font.pixelSize: 26; font.bold: true }
+                    Label { text: "Keymarchy"; font.pixelSize: 26; font.bold: true }
                     Label { text: qsTr("Security keys for Omarchy"); color: "#a3aaa8" }
                 }
                 Item { Layout.fillWidth: true }
@@ -169,6 +169,6 @@ ApplicationWindow {
     Dialog {
         id: busyDialog; anchors.centerIn: parent; width: 420; modal: true
         title: qsTr("Operation in progress"); standardButtons: Dialog.Ok
-        Label { width: parent.width; wrapMode: Text.WordWrap; text: qsTr("Finish the system prompt or cancel enrollment before closing Keykeep.") }
+        Label { width: parent.width; wrapMode: Text.WordWrap; text: qsTr("Finish the system prompt or cancel enrollment before closing Keymarchy.") }
     }
 }

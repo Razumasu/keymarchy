@@ -15,7 +15,7 @@ QByteArray readFile(const QString &path, qint64 limit) {
 }
 QString currentUser() {
     auto *pw = getpwuid(getuid());
-    if (!pw || getuid() == 0) throw Failure(appText("Open Keykeep as your regular user, not as root."));
+    if (!pw || getuid() == 0) throw Failure(appText("Open Keymarchy as your regular user, not as root."));
     return QString::fromLocal8Bit(pw->pw_name);
 }
 QString Registry::fingerprint(const QByteArray &c) {
@@ -97,17 +97,17 @@ QString checkConfiguration() {
             const auto words = line.split(' ');
             if (words.size() != 5 || words[0] != "auth" || words[1] != "sufficient" || words[2] != "pam_u2f.so" ||
                 !words.contains("cue") || !words.contains("authfile=/etc/fido2/fido2"))
-                return appText("Custom sudo FIDO settings detected. Keykeep currently supports Omarchy's standard configuration.");
+                return appText("Custom sudo FIDO settings detected. Keymarchy currently supports Omarchy's standard configuration.");
             ++matches;
         }
-        if (matches != 1) return appText("Set up FIDO2 in Omarchy's Setup > Security menu first, then refresh Keykeep.");
+        if (matches != 1) return appText("Set up FIDO2 in Omarchy's Setup > Security menu first, then refresh Keymarchy.");
         if (!QRegularExpression("(?m)^auth\\s+include\\s+system-auth\\s*$").match(pam).hasMatch())
             return appText("The standard password fallback is missing. Restore it before managing keys.");
         QFile defaults("/etc/security/pam_u2f.conf");
         if (defaults.exists()) {
             const auto config = QString::fromUtf8(readFile(defaults.fileName()));
             for (const auto &line : config.split('\n')) if (!line.section('#',0,0).trimmed().isEmpty())
-                return appText("Custom pam_u2f defaults detected. Keykeep currently supports Omarchy's standard configuration.");
+                return appText("Custom pam_u2f defaults detected. Keymarchy currently supports Omarchy's standard configuration.");
         }
         return {};
     } catch (const Failure &e) { return QString::fromUtf8(e.what()); }

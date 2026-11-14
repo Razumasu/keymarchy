@@ -56,9 +56,10 @@ Backend::Backend(bool demo, QObject *parent) : QObject(parent), m_demo(demo) {
 }
 Backend::~Backend() { pauseDetection(); if (m_process) { m_process->disconnect(this); m_process->kill(); m_process->waitForFinished(1000); } }
 QJsonObject Backend::labels() const {
-    if (!QFileInfo::exists(m_labelPath)) return {};
+    const auto path = labelReadPath(m_labelPath, QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/keykeep/labels.json");
+    if (path.isEmpty()) return {};
     QJsonParseError error;
-    const auto doc = QJsonDocument::fromJson(readFile(m_labelPath), &error);
+    const auto doc = QJsonDocument::fromJson(readFile(path), &error);
     if (error.error != QJsonParseError::NoError || !doc.isObject()) throw Failure(tr("Cannot read saved key names. Repair labels.json before renaming keys."));
     return doc.object();
 }
@@ -142,10 +143,10 @@ void Backend::start(const QString &program, const QStringList &args, int timeout
 }
 void Backend::save(const QJsonObject &request, std::function<void()> after) {
     if (m_demo) { finish(false, tr("Preview mode does not change registrations.")); return; }
-    if (!QFileInfo::exists("/usr/bin/keykeep")) throw Failure(tr("Install Keykeep before changing registrations."));
+    if (!QFileInfo::exists("/usr/bin/keymarchy")) throw Failure(tr("Install Keymarchy before changing registrations."));
     m_phase = "authorize";
     m_message = tr("Approve the system authentication prompt to save the change."); emit changed();
-    start("/usr/bin/pkexec", {"/usr/bin/keykeep", "--helper"}, 120000, [this,after](QByteArray out) {
+    start("/usr/bin/pkexec", {"/usr/bin/keymarchy", "--helper"}, 120000, [this,after](QByteArray out) {
         const auto response = QJsonDocument::fromJson(out).object();
         if (!response.value("ok").toBool()) throw Failure(tr("No confirmation received. Refresh to check the registration."));
         const auto backup = response.value("backup").toString();
@@ -229,4 +230,11 @@ void Backend::detectionFailed(const QString &message) {
     m_connectionMessage = message;
     m_keys = applyPresence(m_keys, {});
     emit changed();
+}
+
+QString Backend::labelReadPath(const QString &current, const QString &legacy) {
+    // Existing names remain visible after the rename; the next edit saves them under Keymarchy.
+    if (QFileInfo::exists(current)) return current;
+    if (QFileInfo::exists(legacy)) return legacy;
+    return {};
 }

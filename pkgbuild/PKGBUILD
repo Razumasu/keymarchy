@@ -1,10 +1,12 @@
-pkgname=keykeep
-pkgver=0.2.0
+pkgname=keymarchy
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Manage named FIDO2 security keys for sudo on Omarchy'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 options=('!debug')
+conflicts=('keykeep')
+replaces=('keykeep')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'pam-u2f' 'libfido2' 'polkit')
 makedepends=('gcc' 'make')
 source=()
@@ -19,10 +21,10 @@ check() {
 }
 package() {
   cd "$startdir/.."
-  install -Dm755 build/keykeep "$pkgdir/usr/bin/keykeep"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/keykeep/LICENSE"
-  install -Dm644 pkgbuild/keykeep.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/keykeep.svg"
-  install -Dm644 pkgbuild/keykeep.desktop "$pkgdir/usr/share/applications/keykeep.desktop"
-  install -Dm644 docs/screenshot.png "$pkgdir/usr/share/doc/keykeep/docs/screenshot.png"
-  install -Dm644 README.md "$pkgdir/usr/share/doc/keykeep/README.md"
+  install -Dm755 build/keymarchy "$pkgdir/usr/bin/keymarchy"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/keymarchy/LICENSE"
+  install -Dm644 pkgbuild/keymarchy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/keymarchy.svg"
+  install -Dm644 pkgbuild/keymarchy.desktop "$pkgdir/usr/share/applications/keymarchy.desktop"
+  install -Dm644 docs/screenshot.png "$pkgdir/usr/share/doc/keymarchy/docs/screenshot.png"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/keymarchy/README.md"
 }

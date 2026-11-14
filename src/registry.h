@@ -6,7 +6,7 @@
 #include <QVector>
 #include <stdexcept>
 
-inline QString appText(const char *text) { return QCoreApplication::translate("Keykeep", text); }
+inline QString appText(const char *text) { return QCoreApplication::translate("Keymarchy", text); }
 
 struct Failure : std::runtime_error {
     explicit Failure(const QString &s) : std::runtime_error(s.toStdString()) {}
