@@ -24,7 +24,10 @@ Building needs GCC, make, and qmake6. The PKGBUILD is in `pkgbuild/`.
 
 - **Add key:** connect only the key to enroll, choose a name, touch it when it
   flashes, and approve the system authentication prompt to save it.
-- **Rename:** use names such as Everyday, Travel, or Backup at home.
+- **Identify and rename:** plug in a key. Its registration shows **Connected**
+  and is highlighted automatically, usually within three seconds. Use Rename
+  to give it a name such as Everyday, Travel, or Backup at home. Unplug it and
+  plug in the next key to name the rest. No touch or password is needed for detection.
 - **Remove:** choose a registration and confirm. Removing the last registration
   leaves password authentication in place.
 - **Refresh:** reload registrations changed by another tool.
@@ -39,8 +42,11 @@ Existing registrations have no device name or serial number. They initially
 appear as Key 1, Key 2, etc., in file order, with a stable registration fingerprint.
 Those generated numbers can change after removal; assign names before relying
 on them. A fingerprint identifies a *registration*, not a physical device.
-The same physical key can have multiple registrations. Keykeep does not currently
-detect that duplication or identify which existing entry matches a plugged-in key.
+The same physical key can have multiple registrations; all matching entries
+are highlighted when it is connected. Multiple connected keys are supported.
+If none match, the app reports an unregistered key. If a key cannot be queried
+(for example, because it requires verification or another app is using it),
+the app shows an unknown state rather than claiming it is disconnected.
 
 Adding a key enrolls it; it is not a sudo authentication test. To verify it,
 leave only that key connected and run `sudo -k -v`, then touch it when prompted.
@@ -58,7 +64,8 @@ keykeep rename FULL_REGISTRATION_ID "Travel key" --json
 keykeep remove FULL_REGISTRATION_ID --yes --json
 ```
 
-Use the full ID returned by `list`. Commands run without a display; saving an
+The `list` output includes `connection` (`connected`, `disconnected`, or `unknown`)
+and matching device descriptions. Use the full ID returned by `list`. Commands run without a display; saving an
 addition or removal invokes `pkexec`, which may use a graphical authentication
 agent or a terminal prompt. Run as your regular user. Exit status is 0 on success,
 1 on failure. With `--json`, stdout contains JSON and progress/errors go to stderr.
@@ -99,6 +106,22 @@ Names are stored separately in `~/.local/share/keykeep/labels.json`, keyed by
 registration fingerprint. They are descriptive and have no authentication role.
 Removal keeps the label so restoring a registration also restores its name.
 There is no automatic undo of an authentication change.
+
+## Connected-key detection
+
+Detection uses libfido2's silent credential check, with user presence disabled
+for this discovery request only. FIDO2 matches are verified against the saved
+public key using a fresh random challenge. Legacy U2F keys use the protocol's
+check-only response. This does not change the touch/PIN requirements for sudo,
+the registration file, or the key's configuration. Signed checks can advance
+the authenticator's signature counter, as normal FIDO assertions do.
+
+The GUI checks for device changes every three seconds in a separate process.
+It caches successful results by registration revision, hostname, and device-node
+generation, so idle polling does not repeatedly ask the key for assertions.
+Refresh forces a new check. Detection pauses during enrollment and saving.
+
+Reference: [Yubico libfido2 assertions](https://developers.yubico.com/libfido2/Manuals/fido_dev_get_assert.html).
 
 ## Development
 

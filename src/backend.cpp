@@ -1,5 +1,6 @@
 #include "backend.h"
 #include "registry.h"
+#include "presence.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -14,9 +15,46 @@ Backend::Backend(bool demo, QObject *parent) : QObject(parent), m_demo(demo) {
         if (m_process) m_process->kill();
         finish(false, tr("The operation timed out. Refresh before trying again."));
     });
+    m_scanTimeout.setSingleShot(true);
+    m_scanTimeout.setInterval(30000);
+    m_poll.setInterval(3000);
+    connect(&m_poll, &QTimer::timeout, this, &Backend::scanNow);
+    connect(&m_scanTimeout, &QTimer::timeout, &m_scan, &QProcess::kill);
+    connect(&m_scan, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (m_acceptScan && error == QProcess::FailedToStart) detectionFailed(tr("Could not start connected-key detection."));
+    });
+    connect(&m_scan, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        m_scanTimeout.stop();
+        if (!m_acceptScan || m_busy) return;
+        const auto out = m_scan.readAllStandardOutput();
+        m_scan.readAllStandardError();
+        if (code != 0 || status != QProcess::NormalExit) {
+            detectionFailed(tr("Could not identify connected keys. Check the connection and refresh.")); return;
+        }
+        QJsonParseError error;
+        const auto doc = QJsonDocument::fromJson(out, &error);
+        if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+            detectionFailed(tr("Could not read connected-key detection results.")); return;
+        }
+        const auto result = doc.object();
+        if (result.value("revision").toString() != m_revision) { refresh(); return; }
+        if (result.value("unchanged").toBool()) return;
+        m_scanToken = result.value("token").toString();
+        m_keys = applyPresence(m_keys, result);
+        bool connected = false, unknown = false;
+        for (const auto &row : m_keys) {
+            connected |= row.toMap().value("connection") == "connected";
+            unknown |= row.toMap().value("connection") == "unknown";
+        }
+        m_connectionMessage = connected ? tr("Connected keys are highlighted. Rename one to give it a memorable name.")
+            : unknown ? tr("A connected key could not be identified without verification. Try Refresh.")
+            : result.value("deviceCount").toInt() == 0 ? tr("No security key connected.")
+            : tr("The connected key does not match a saved registration.");
+        emit changed();
+    });
     refresh();
 }
-Backend::~Backend() { if (m_process) { m_process->disconnect(this); m_process->kill(); m_process->waitForFinished(1000); } }
+Backend::~Backend() { pauseDetection(); if (m_process) { m_process->disconnect(this); m_process->kill(); m_process->waitForFinished(1000); } }
 QJsonObject Backend::labels() const {
     if (!QFileInfo::exists(m_labelPath)) return {};
     QJsonParseError error;
@@ -40,12 +78,15 @@ void Backend::saveLabel(const QString &id, const QString &name) {
 }
 void Backend::refresh() {
     if (m_busy) return;
+    pauseDetection();
+    m_scanToken.clear();
     m_keys.clear(); m_problem.clear();
     if (m_demo) {
         int n = 1;
         for (const auto &name : {tr("Everyday key"), tr("Travel key"), tr("Backup at home")}) {
-            m_keys.append(QVariantMap{{"id",QString(64, QChar('a' + n))},{"name",name},{"shortId",QString("8f%1a · 42c%1").arg(n++)}});
+            m_keys.append(QVariantMap{{"id",QString(64, QChar('a' + n))},{"name",name},{"connection",n == 1 ? "connected" : "disconnected"},{"shortId",QString("8f%1a · 42c%1").arg(n++)}});
         }
+        m_connectionMessage = tr("Connected keys are highlighted. Rename one to give it a memorable name.");
         emit changed(); return;
     }
     try {
@@ -57,10 +98,11 @@ void Backend::refresh() {
         for (const auto &key : registry.keys()) {
             auto name = names.value(key.id).toString();
             if (name.isEmpty()) name = tr("Key %1").arg(n);
-            m_keys.append(QVariantMap{{"id",key.id},{"name",name},{"shortId",key.id.left(12)}});
+            m_keys.append(QVariantMap{{"id",key.id},{"name",name},{"shortId",key.id.left(12)},{"connection","checking"}});
             ++n;
         }
     } catch (const std::exception &e) { if (m_problem.isEmpty()) m_problem = QString::fromUtf8(e.what()); }
+    if (m_monitoring) { m_poll.start(); scanNow(); }
     emit changed();
 }
 bool Backend::exists(const QString &id) const {
@@ -120,6 +162,7 @@ void Backend::add(const QString &name) {
         const auto label = validateName(name);
         if (m_keys.size() >= 24) throw Failure(tr("The default limit of 24 registrations has been reached."));
         if (m_demo) throw Failure(tr("Preview mode does not change registrations."));
+        pauseDetection();
         m_busy = true; m_phase = "detect"; m_message = tr("Checking for a connected security key…"); emit changed();
         const auto revision = m_revision;
         start("/usr/bin/fido2-token", {"-L"}, 10000, [this,label,revision](QByteArray output) {
@@ -142,6 +185,7 @@ void Backend::remove(const QString &id) {
     try {
         if (!m_problem.isEmpty()) throw Failure(m_problem);
         if (!exists(id)) throw Failure(tr("Select a registered key first."));
+        pauseDetection();
         m_busy = true;
         save({{"action","remove"},{"revision",m_revision},{"id",id}}, [] {});
     } catch (const std::exception &e) { finish(false, QString::fromUtf8(e.what())); }
@@ -159,4 +203,30 @@ void Backend::cancel() {
     if (!m_busy || m_phase == "authorize") return;
     if (m_process) { auto *p = m_process; m_process = nullptr; p->kill(); }
     finish(false, tr("Enrollment cancelled. No registration was added."));
+}
+
+void Backend::startMonitoring() {
+    if (m_demo) return;
+    m_monitoring = true;
+    m_poll.start();
+    scanNow();
+}
+void Backend::pauseDetection() {
+    m_acceptScan = false;
+    m_poll.stop(); m_scanTimeout.stop();
+    if (m_scan.state() != QProcess::NotRunning) { m_scan.kill(); m_scan.waitForFinished(1000); }
+}
+void Backend::scanNow() {
+    if (!m_monitoring || m_demo || m_busy || m_scan.state() != QProcess::NotRunning) return;
+    if (!m_problem.isEmpty()) { detectionFailed(tr("Connected-key detection is unavailable for this configuration.")); return; }
+    m_acceptScan = true;
+    m_scan.start(QCoreApplication::applicationFilePath(), {"--scan", m_scanToken});
+    m_scan.closeWriteChannel();
+    m_scanTimeout.start();
+}
+void Backend::detectionFailed(const QString &message) {
+    m_scanTimeout.stop(); m_scanToken.clear();
+    m_connectionMessage = message;
+    m_keys = applyPresence(m_keys, {});
+    emit changed();
 }

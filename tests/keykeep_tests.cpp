@@ -11,6 +11,7 @@
 #include <sys/file.h>
 #include <fcntl.h>
 #include "registry.h"
+#include "presence.h"
 #include "store.h"
 #include "backend.h"
 #include "theme.h"
@@ -113,6 +114,48 @@ private slots:
         QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(data,"add")),Failure);
         close(fd); QCOMPARE(readFile(dir.filePath("fido2")),data);
     }
+    void detectsExactRegistrationAndDisconnection() {
+        const QVector<Key> keys{{"first",one},{"second",two}};
+        const QVector<AttachedKey> devices{{"/device","YubiKey","generation-1"}};
+        const auto result=detectPresence(keys,devices,[](const AttachedKey &,const Key &key) {
+            return key.id=="second" ? Match::Present : Match::Absent;
+        });
+        const auto rows=result.value("keys").toArray();
+        QCOMPARE(rows[0].toObject().value("connection").toString(),QString("disconnected"));
+        QCOMPARE(rows[1].toObject().value("connection").toString(),QString("connected"));
+        QCOMPARE(rows[1].toObject().value("devices").toArray().first().toString(),QString("YubiKey"));
+        bool probed=false;
+        const auto unplugged=detectPresence(keys,{},[&](const AttachedKey &,const Key &) { probed=true; return Match::Present; });
+        QVERIFY(!probed);
+        QCOMPARE(unplugged.value("deviceCount").toInt(),0);
+        for (const auto row:unplugged.value("keys").toArray()) QCOMPARE(row.toObject().value("connection").toString(),QString("disconnected"));
+    }
+    void detectionErrorsAreNotReportedAsDisconnected() {
+        const QVector<Key> keys{{"first",one}};
+        const QVector<AttachedKey> devices{{"/device","YubiKey","generation-1"}};
+        const auto result=detectPresence(keys,devices,[](const AttachedKey &,const Key &) { return Match::Unknown; });
+        QCOMPARE(result.value("keys").toArray()[0].toObject().value("connection").toString(),QString("unknown"));
+    }
+    void detectsSeveralKeysAndDuplicateRegistrations() {
+        const QVector<Key> keys{{"first",one},{"second",two},{"third",three}};
+        const QVector<AttachedKey> devices{{"/a","YubiKey A","1"},{"/b","YubiKey B","2"}};
+        const auto result=detectPresence(keys,devices,[](const AttachedKey &device,const Key &key) {
+            return ((device.path=="/a" && (key.id=="first" || key.id=="third")) || (device.path=="/b" && key.id=="second")) ? Match::Present : Match::Absent;
+        });
+        const auto rows=result.value("keys").toArray();
+        for (const auto &row:rows) QCOMPARE(row.toObject().value("connection").toString(),QString("connected"));
+        QCOMPARE(rows[0].toObject().value("devices"),rows[2].toObject().value("devices"));
+    }
+    void mapsDetectionByIdAndClearsStaleBadges() {
+        const QVariantList keys{QVariantMap{{"id","second"},{"name","Backup"},{"connection","connected"}},QVariantMap{{"id","first"},{"name","Daily"}}};
+        const QJsonObject scan{{"keys",QJsonArray{QJsonObject{{"id","first"},{"connection","connected"}},QJsonObject{{"id","second"},{"connection","disconnected"}}}}};
+        const auto mapped=applyPresence(keys,scan);
+        QCOMPARE(mapped[0].toMap().value("name").toString(),QString("Backup"));
+        QCOMPARE(mapped[0].toMap().value("connection").toString(),QString("disconnected"));
+        QCOMPARE(mapped[1].toMap().value("connection").toString(),QString("connected"));
+        const auto failed=applyPresence(mapped,{});
+        for (const auto &row:failed) QCOMPARE(row.toMap().value("connection").toString(),QString("unknown"));
+    }
     void validatesNames() {
         QCOMPARE(Backend::validateName("  Backup  "),QString("Backup"));
         QVERIFY_EXCEPTION_THROWN(Backend::validateName("\n"),Failure);
@@ -136,6 +179,13 @@ private slots:
         engine.load(QUrl("qrc:/Main.qml")); QVERIFY(!engine.rootObjects().isEmpty());
         auto *win=qobject_cast<QQuickWindow*>(engine.rootObjects().first()); QVERIFY(win);
         QTest::qWait(150);
+        int connectedBadges=0;
+        std::function<void(QQuickItem *)> inspect = [&](QQuickItem *item) {
+            if (item->objectName()=="connectionBadge" && item->property("text").toString()=="Connected") ++connectedBadges;
+            for (auto *child:item->childItems()) inspect(child);
+        };
+        inspect(win->contentItem());
+        QCOMPARE(connectedBadges,1);
         auto *button=win->findChild<QQuickItem*>("addButton"); QVERIFY(button);
         const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint();
         QTest::mouseClick(win,Qt::LeftButton,Qt::NoModifier,point);

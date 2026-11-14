@@ -11,6 +11,7 @@
 #include <QSaveFile>
 #include <QDir>
 #include "backend.h"
+#include "presence.h"
 #include "registry.h"
 #include "theme.h"
 #include "translator.h"
@@ -19,10 +20,15 @@ int main(int argc, char **argv) {
     QStringList args;
     for (int i = 1; i < argc; ++i) args << QString::fromLocal8Bit(argv[i]);
     if (args == QStringList{"--helper"}) { QCoreApplication app(argc,argv); return runHelper(); }
+    if (args.value(0) == "--scan" && args.size() <= 2) {
+        QCoreApplication app(argc,argv);
+        try { QTextStream(stdout) << QJsonDocument(scanPresence(args.value(1))).toJson(QJsonDocument::Compact) << '\n'; return 0; }
+        catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
+    }
     const bool gui = args.isEmpty() || args.first() == "open" || args.first() == "--preview";
     if (!gui) { qputenv("QT_QPA_PLATFORM", "offscreen"); qputenv("QT_QPA_PLATFORMTHEME", "basic"); }
     QGuiApplication app(argc,argv);
-    app.setApplicationName("keykeep"); app.setApplicationVersion("0.1.0");
+    app.setApplicationName("keykeep"); app.setApplicationVersion("0.2.0");
     app.setDesktopFileName("keykeep"); app.setWindowIcon(QIcon::fromTheme("keykeep"));
     QQuickStyle::setStyle("Material");
     Translator translator; app.installTranslator(&translator);
@@ -36,7 +42,7 @@ int main(int argc, char **argv) {
         } catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
     }
     if (args.contains("--help") || args.contains("-h")) {
-        QTextStream(stdout) << "Keykeep 0.1.0 — security keys for Omarchy\n"
+        QTextStream(stdout) << "Keykeep 0.2.0 — security keys for Omarchy\n"
             "  keykeep open\n  keykeep list [--json]\n  keykeep add NAME [--json]\n"
             "  keykeep rename ID NAME [--json]\n  keykeep remove ID --yes [--json]\n"
             "  keykeep skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";
@@ -48,9 +54,16 @@ int main(int argc, char **argv) {
         const bool json = args.removeAll("--json") > 0;
         const auto command = args.value(0);
         if (command == "list" && args.size() == 1) {
-            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"keys",QJsonArray::fromVariantList(backend.keys())},{"problem",backend.problem()}}).toJson();
-            else for (const auto &item : backend.keys()) { const auto key=item.toMap(); QTextStream(stdout) << key.value("id").toString() << "  " << key.value("name").toString() << '\n'; }
+            auto keys = backend.keys();
+            QString detectionError;
+            if (backend.problem().isEmpty()) {
+                try { keys = applyPresence(keys, scanPresence()); }
+                catch (const std::exception &e) { detectionError = QString::fromUtf8(e.what()); keys = applyPresence(keys, {}); }
+            }
+            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"keys",QJsonArray::fromVariantList(keys)},{"problem",backend.problem()},{"detectionError",detectionError}}).toJson();
+            else for (const auto &item : keys) { const auto key=item.toMap(); QTextStream(stdout) << key.value("id").toString() << "  " << key.value("name").toString() << "  [" << key.value("connection").toString() << "]" << '\n'; }
             if (!backend.problem().isEmpty()) { QTextStream(stderr) << backend.problem() << '\n'; return 1; }
+            if (!detectionError.isEmpty()) { QTextStream(stderr) << detectionError << '\n'; return 1; }
             return 0;
         }
         QObject::connect(&backend,&Backend::completed,&app,[&](bool success) {
@@ -68,6 +81,7 @@ int main(int argc, char **argv) {
         });
         return app.exec();
     }
+    if (!preview) backend.startMonitoring();
     Theme theme(preview ? "/nonexistent-keykeep-preview" : QString());
     QQmlApplicationEngine engine;
     QObject::connect(&translator,&Translator::changed,&engine,&QQmlEngine::retranslate);

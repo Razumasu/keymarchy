@@ -1,5 +1,5 @@
 pkgname=keykeep
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Manage named FIDO2 security keys for sudo on Omarchy'
 arch=('x86_64' 'aarch64')

@@ -57,5 +57,17 @@
   "&Cancel": "Annuller",
   "Close": "Luk",
   "&Close": "Luk",
-  "OK": "OK"
+  "OK": "OK",
+  "Connected": "Tilsluttet",
+  "Not connected": "Ikke tilsluttet",
+  "Checking…": "Kontrollerer…",
+  "Unable to check": "Kan ikke kontrollere",
+  "Connected keys are highlighted. Rename one to give it a memorable name.": "Tilsluttede nøgler er fremhævet. Omdøb en nøgle, så den er nem at genkende.",
+  "No security key connected.": "Ingen sikkerhedsnøgle tilsluttet.",
+  "The connected key does not match a saved registration.": "Den tilsluttede nøgle matcher ingen gemt registrering.",
+  "A connected key could not be identified without verification. Try Refresh.": "En tilsluttet nøgle kunne ikke identificeres uden bekræftelse. Prøv Opdater.",
+  "Could not start connected-key detection.": "Kunne ikke starte registrering af tilsluttede nøgler.",
+  "Could not identify connected keys. Check the connection and refresh.": "Kunne ikke identificere tilsluttede nøgler. Kontroller forbindelsen og opdater.",
+  "Could not read connected-key detection results.": "Kunne ikke læse resultatet af søgningen efter tilsluttede nøgler.",
+  "Connected-key detection is unavailable for this configuration.": "Søgning efter tilsluttede nøgler er ikke tilgængelig med denne konfiguration."
 }

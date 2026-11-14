@@ -73,6 +73,11 @@ ApplicationWindow {
                 text: backend.problem; wrapMode: Text.WordWrap; color: "#f3b794"
                 Accessible.role: Accessible.AlertMessage
             }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                text: backend.connectionMessage; color: "#a3aaa8"; font.pixelSize: 12
+                visible: text.length > 0
+            }
             ListView {
                 id: list; objectName: "keyList"
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 8
@@ -83,16 +88,25 @@ ApplicationWindow {
                     required property var modelData
                     required property int index
                     width: list.width; height: 78; radius: Math.min(8, theme.radius)
-                    color: ListView.isCurrentItem ? "#252e2b" : "#1a1e20"
+                    color: ListView.isCurrentItem || modelData.connection === "connected" ? "#252e2b" : "#1a1e20"
                     border.color: ListView.isCurrentItem ? theme.accent : "#303638"
                     MouseArea { anchors.fill: parent; onClicked: { list.currentIndex = index; list.forceActiveFocus() } }
                     RowLayout {
                         anchors.fill: parent; anchors.margins: 16; spacing: 14
-                        Rectangle { width: 10; height: 10; radius: 5; color: theme.accent }
+                        Rectangle { width: 10; height: 10; radius: 5; color: modelData.connection === "connected" ? theme.accent : "#64716a" }
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 5
                             Label { text: modelData.name; font.pixelSize: 16; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; textFormat: Text.PlainText }
-                            Label { text: qsTr("Registration %1").arg(modelData.shortId); color: "#929c98"; font.pixelSize: 12; font.family: "monospace" }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: 10
+                                Label {
+                                    objectName: "connectionBadge"
+                                    text: modelData.connection === "connected" ? qsTr("Connected") : modelData.connection === "disconnected" ? qsTr("Not connected") : modelData.connection === "checking" ? qsTr("Checking…") : qsTr("Unable to check")
+                                    color: modelData.connection === "connected" ? theme.accent : "#929c98"
+                                    font.pixelSize: 12; font.bold: modelData.connection === "connected"
+                                }
+                                Label { text: modelData.shortId; color: "#929c98"; font.pixelSize: 12; font.family: "monospace"; elide: Text.ElideRight; Layout.fillWidth: true }
+                            }
                         }
                         Button { text: qsTr("Rename"); enabled: !backend.busy; onClicked: { list.currentIndex = index; win.openName(true) } }
                         Button { text: qsTr("Remove"); enabled: !backend.busy && !backend.problem; onClicked: { list.currentIndex = index; win.openRemove() } }

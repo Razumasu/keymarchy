@@ -12,6 +12,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString message READ message NOTIFY changed)
     Q_PROPERTY(QString problem READ problem NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
+    Q_PROPERTY(QString connectionMessage READ connectionMessage NOTIFY changed)
     Q_PROPERTY(QString phase READ phase NOTIFY changed)
 public:
     explicit Backend(bool demo = false, QObject *parent = nullptr);
@@ -20,6 +21,8 @@ public:
     QString message() const { return m_message; }
     QString problem() const { return m_problem; }
     bool busy() const { return m_busy; }
+    QString connectionMessage() const { return m_connectionMessage; }
+    void startMonitoring();
     QString phase() const { return m_phase; }
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void add(const QString &name);
@@ -38,10 +41,17 @@ private:
     QJsonObject labels() const;
     void saveLabel(const QString &id, const QString &name);
     bool exists(const QString &id) const;
+    void scanNow();
+    void pauseDetection();
+    void detectionFailed(const QString &message);
     bool m_demo = false, m_busy = false;
     QVariantList m_keys;
     QString m_message, m_problem, m_revision, m_phase;
     QProcess *m_process = nullptr;
     QTimer m_timeout;
     QString m_labelPath;
+    QProcess m_scan;
+    QTimer m_poll, m_scanTimeout;
+    QString m_scanToken, m_connectionMessage;
+    bool m_monitoring = false, m_acceptScan = false;
 };

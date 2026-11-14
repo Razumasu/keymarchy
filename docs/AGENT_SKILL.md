@@ -2,7 +2,7 @@
 name: keykeep
 description: List, name, add, and remove local Omarchy FIDO2 sudo registrations with Keykeep.
 ---
-Use `keykeep list --json` before changes. Existing registrations have generated names and stable full IDs; do not assume a registration fingerprint is a device serial number. Never choose an ambiguous removal target.
+Use `keykeep list --json` before changes. Existing registrations have generated names and stable full IDs; do not assume a registration fingerprint is a device serial number. The list output includes connection status and matching device descriptions. Use these to help the user identify and name a plugged-in key. Never choose an ambiguous removal target.
 
 - Add: `keykeep add "Backup key" --json`. Ask the user to connect only the new key and touch it when it flashes. The system authentication prompt authorizes saving.
 - Rename: `keykeep rename FULL_ID "New name" --json`.
