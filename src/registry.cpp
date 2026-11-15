@@ -87,28 +87,41 @@ QByteArray Registry::remove(const QString &id) const {
     for (int i = 0; i < list.size(); ++i) if (list[i].id == id) { list.remove(i); return replace(list); }
     throw Failure(appText("That registration no longer exists. Refresh and try again."));
 }
+QString checkPamConfiguration(const QString &pam, const QString &defaults) {
+    const auto unsupported = appText("Custom sudo authentication settings detected. Keymarchy currently supports Omarchy's standard configuration.");
+    QList<QStringList> auth;
+    bool hasFido = false;
+    for (auto line : pam.split('\n')) {
+        line = line.section('#', 0, 0).simplified();
+        if (line.isEmpty()) continue;
+        // Only the standard, ordered auth stack is supported. In particular,
+        // a pam_deny rule between the key and password would defeat fallback.
+        const auto words = line.split(' ');
+        if (words.size() < 3 || line.contains('\\') || line.contains(QChar('\0'))) return unsupported;
+        if (words[0] == "auth") {
+            auth.append(words);
+            hasFido |= words[2] == "pam_u2f.so";
+        } else if (!QStringList{"account", "password", "session", "-account", "-password", "-session"}.contains(words[0]) ||
+                   line.contains("pam_u2f.so")) {
+            // Fail closed on includes, -auth and syntax we do not interpret.
+            return unsupported;
+        }
+    }
+    if (!hasFido) return appText("Set up FIDO2 in Omarchy's Setup > Security menu first, then refresh Keymarchy.");
+    if (auth.size() != 2) return unsupported;
+    const auto &key = auth[0];
+    if (key.size() != 5 || key[1] != "sufficient" || key[2] != "pam_u2f.so" ||
+        !key.contains("cue") || !key.contains("authfile=/etc/fido2/fido2") ||
+        auth[1] != QStringList{"auth", "include", "system-auth"}) return unsupported;
+    for (const auto &line : defaults.split('\n')) if (!line.section('#', 0, 0).trimmed().isEmpty())
+        return appText("Custom pam_u2f defaults detected. Keymarchy currently supports Omarchy's standard configuration.");
+    return {};
+}
 QString checkConfiguration() {
     try {
         const auto pam = QString::fromUtf8(readFile("/etc/pam.d/sudo"));
-        int matches = 0;
-        for (auto line : pam.split('\n')) {
-            line = line.section('#', 0, 0).simplified();
-            if (!line.contains("pam_u2f.so")) continue;
-            const auto words = line.split(' ');
-            if (words.size() != 5 || words[0] != "auth" || words[1] != "sufficient" || words[2] != "pam_u2f.so" ||
-                !words.contains("cue") || !words.contains("authfile=/etc/fido2/fido2"))
-                return appText("Custom sudo FIDO settings detected. Keymarchy currently supports Omarchy's standard configuration.");
-            ++matches;
-        }
-        if (matches != 1) return appText("Set up FIDO2 in Omarchy's Setup > Security menu first, then refresh Keymarchy.");
-        if (!QRegularExpression("(?m)^auth\\s+include\\s+system-auth\\s*$").match(pam).hasMatch())
-            return appText("The standard password fallback is missing. Restore it before managing keys.");
-        QFile defaults("/etc/security/pam_u2f.conf");
-        if (defaults.exists()) {
-            const auto config = QString::fromUtf8(readFile(defaults.fileName()));
-            for (const auto &line : config.split('\n')) if (!line.section('#',0,0).trimmed().isEmpty())
-                return appText("Custom pam_u2f defaults detected. Keymarchy currently supports Omarchy's standard configuration.");
-        }
-        return {};
+        const QString path = "/etc/security/pam_u2f.conf";
+        const auto defaults = QFile::exists(path) ? QString::fromUtf8(readFile(path)) : QString();
+        return checkPamConfiguration(pam, defaults);
     } catch (const Failure &e) { return QString::fromUtf8(e.what()); }
 }

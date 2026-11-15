@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- Reject additional or reordered sudo authentication rules before managing keys,
+  including rules that could block password authentication after key removal.
+- Detect legacy U2F registrations with URL-safe or unpadded credential handles
+  without changing their saved registrations, fingerprints, or names.
+- Ask users to verify password authentication before removing their last key.
+- Add regression coverage for the supported PAM stack and legacy handles.
+
 ## 0.3.0
 
 First public release of Keymarchy.

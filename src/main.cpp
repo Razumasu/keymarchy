@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
     const bool gui = args.isEmpty() || args.first() == "open" || args.first() == "--preview";
     if (!gui) { qputenv("QT_QPA_PLATFORM", "offscreen"); qputenv("QT_QPA_PLATFORMTHEME", "basic"); }
     QGuiApplication app(argc,argv);
-    app.setApplicationName("keymarchy"); app.setApplicationVersion("0.3.0");
+    app.setApplicationName("keymarchy"); app.setApplicationVersion("0.3.1");
     app.setDesktopFileName("keymarchy"); app.setWindowIcon(QIcon::fromTheme("keymarchy"));
     QQuickStyle::setStyle("Material");
     Translator translator; app.installTranslator(&translator);
@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
         } catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
     }
     if (args.contains("--help") || args.contains("-h")) {
-        QTextStream(stdout) << "Keymarchy 0.3.0 — security keys for Omarchy\n"
+        QTextStream(stdout) << "Keymarchy 0.3.1 — security keys for Omarchy\n"
             "  keymarchy open\n  keymarchy list [--json]\n  keymarchy add NAME [--json]\n"
             "  keymarchy rename ID NAME [--json]\n  keymarchy remove ID --yes [--json]\n"
             "  keymarchy skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";

@@ -30,5 +30,6 @@ private:
 };
 QByteArray readFile(const QString &path, qint64 limit = 1024 * 1024);
 QString currentUser();
+QString checkPamConfiguration(const QString &pam, const QString &defaults = {});
 QString checkConfiguration();
 int runHelper();

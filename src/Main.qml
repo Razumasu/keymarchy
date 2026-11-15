@@ -159,7 +159,7 @@ ApplicationWindow {
         onOpened: standardButton(Dialog.Ok).text = qsTr("Remove key")
         onAccepted: backend.remove(keyId)
         Label { width: parent.width; wrapMode: Text.WordWrap; textFormat: Text.PlainText
-            text: (backend.keys.length === 1 ? qsTr("This is your last registered key. You’ll use your password after removing it.") + "\n\n" : "") + qsTr("Remove “%1” from this computer’s FIDO2 registrations? A backup will be saved.").arg(removeDialog.keyName) }
+            text: (backend.keys.length === 1 ? qsTr("This is your last registered key. Make sure you can use sudo with your password before removing it.") + "\n\n" : "") + qsTr("Remove “%1” from this computer’s FIDO2 registrations? A backup will be saved.").arg(removeDialog.keyName) }
     }
     Dialog {
         id: helpDialog; anchors.centerIn: parent; width: 410; modal: true

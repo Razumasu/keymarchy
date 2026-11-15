@@ -7,6 +7,7 @@
 enum class Match { Absent, Present, Unknown };
 struct AttachedKey { QString path; QString description; QString identity; };
 using Probe = std::function<Match(const AttachedKey &, const Key &)>;
+QByteArray decodeCredentialHandle(const QByteArray &credential);
 QJsonObject detectPresence(const QVector<Key> &keys, const QVector<AttachedKey> &devices, const Probe &probe);
 QJsonObject scanPresence(const QString &cachedToken = {});
 QVariantList applyPresence(const QVariantList &keys, const QJsonObject &result);

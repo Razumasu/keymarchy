@@ -38,15 +38,18 @@ available, use the source installation above.
   and is highlighted automatically, usually within three seconds. Use Rename
   to give it a name such as Everyday, Travel, or Backup at home. Unplug it and
   plug in the next key to name the rest. No touch or password is needed for detection.
-- **Remove:** choose a registration and confirm. Removing the last registration
-  leaves password authentication in place.
+- **Remove:** choose a registration and confirm. Before removing the last key,
+  disconnect all keys and check that `sudo -k -v` accepts your password.
 - **Refresh:** reload registrations changed by another tool.
 
 Keymarchy manages the standard Omarchy FIDO2 setup, using `/etc/fido2/fido2`.
 If FIDO2 has never been configured, first enroll a key through Omarchy's
 **Setup > Security > FIDO2** menu. Keymarchy then manages additional keys.
-Custom PAM origins, authfile paths, and pam-u2f defaults are currently rejected
-with an explanation, rather than guessed.
+The supported sudo authentication stack is `pam_u2f.so` marked `sufficient`,
+followed by `auth include system-auth`, with no additional authentication rules.
+Custom rule order, origins, authfile paths, and pam-u2f defaults are rejected.
+This configuration check cannot verify your password or the included
+`system-auth` policy; test password authentication before removing your last key.
 
 Existing registrations have no device name or serial number. They initially
 appear as Key 1, Key 2, etc., in file order, with a stable registration fingerprint.

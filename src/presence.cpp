@@ -18,6 +18,21 @@ static QByteArray decode(const QByteArray &value) {
     if (!decoded || decoded.decoded.isEmpty()) throw Failure(appText("Invalid credential encoding."));
     return decoded.decoded;
 }
+QByteArray decodeCredentialHandle(const QByteArray &credential) {
+    Registry::validateCredential(credential);
+    const auto fields = credential.split(',');
+    auto handle = fields[0];
+    if (fields.size() == 2) {
+        // Old pam-u2f registrations use web-safe base64, sometimes unpadded.
+        // Normalize only this temporary copy; registration IDs use stored bytes.
+        handle.replace('-', '+');
+        handle.replace('_', '/');
+        const auto remainder = handle.size() % 4;
+        if (remainder == 1) throw Failure(appText("Invalid credential encoding."));
+        if (remainder) handle.append(4 - remainder, '=');
+    }
+    return decode(handle);
+}
 static bool verify(fido_assert_t *assertion, const QList<QByteArray> &fields) {
     auto publicKey = fields.size() == 2 ? QByteArray::fromHex(fields[1]) : decode(fields[1]);
     const auto algorithm = fields.size() == 2 ? QByteArray("es256") : fields[2];
@@ -58,7 +73,7 @@ static Match probeDevice(const AttachedKey &device, const Key &key) {
     opened = true;
     try {
         const auto fields = key.credential.split(',');
-        const auto handle = decode(fields[0]);
+        const auto handle = decodeCredentialHandle(key.credential);
         const auto rp = ("pam://" + QSysInfo::machineHostName()).toUtf8();
         quint32 challenge[8];
         QRandomGenerator::system()->fillRange(challenge);

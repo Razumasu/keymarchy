@@ -30,6 +30,76 @@ class KeymarchyTests : public QObject {
     }
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void acceptsStandardPamConfiguration() {
+        const QString pam = "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\n"
+                            "#%PAM-1.0\nauth include system-auth\n"
+                            "account include system-auth\nsession include system-auth\n"
+                            "session optional pam_systemd.so class=none\n";
+        QVERIFY(checkPamConfiguration(pam).isEmpty());
+        QVERIFY(checkPamConfiguration(pam, "# no defaults\n\n").isEmpty());
+        const QString spaced = "  auth\tsufficient pam_u2f.so authfile=/etc/fido2/fido2 cue # key\r\n"
+                               "\n auth  include\tsystem-auth # password\n"
+                               "-session optional pam_systemd.so\n";
+        QVERIFY(checkPamConfiguration(spaced).isEmpty());
+    }
+    void rejectsCustomPamConfiguration_data() {
+        QTest::addColumn<QString>("pam");
+        const QString key = "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\n";
+        const QString password = "auth include system-auth\n";
+        QTest::newRow("reviewed-lockout") << key + "auth requisite pam_deny.so\n" + password;
+        QTest::newRow("required-before-key") << "auth required pam_deny.so\n" + key + password;
+        QTest::newRow("deny-after-password") << key + password + "auth required pam_deny.so\n";
+        QTest::newRow("reordered") << password + key;
+        QTest::newRow("duplicate-key") << key + key + password;
+        QTest::newRow("duplicate-password") << key + password + password;
+        QTest::newRow("no-key") << password;
+        QTest::newRow("no-password") << key;
+        QTest::newRow("optional-module-prefix") << key + "-auth required pam_deny.so\n" + password;
+        QTest::newRow("extended-control") << key + "auth [default=die] pam_deny.so\n" + password;
+        QTest::newRow("include-directive") << key + "@include other-auth\n" + password;
+        QTest::newRow("substack") << key + "auth substack system-auth\n";
+        QTest::newRow("custom-origin") << "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2 origin=custom\n" + password;
+        QTest::newRow("custom-authfile") << "auth sufficient pam_u2f.so cue authfile=/etc/other\n" + password;
+        QTest::newRow("malformed-line") << key + "invalid\n" + password;
+    }
+    void rejectsCustomPamConfiguration() {
+        QFETCH(QString, pam);
+        QVERIFY(!checkPamConfiguration(pam).isEmpty());
+    }
+    void rejectsCustomPamDefaults() {
+        const QString pam = "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\nauth include system-auth\n";
+        QVERIFY(!checkPamConfiguration(pam, "# default overrides\norigin=custom\n").isEmpty());
+    }
+    void decodesLegacyHandles_data() {
+        QTest::addColumn<QByteArray>("handle");
+        QTest::addColumn<QByteArray>("expected");
+        QTest::newRow("url-safe") << QByteArray("-___") << QByteArray::fromHex("fbffff");
+        QTest::newRow("standard") << QByteArray("+///") << QByteArray::fromHex("fbffff");
+        QTest::newRow("mixed") << QByteArray("-/_/") << QByteArray::fromHex("fbffff");
+        QTest::newRow("unpadded-two") << QByteArray("-w") << QByteArray::fromHex("fb");
+        QTest::newRow("unpadded-three") << QByteArray("-_8") << QByteArray::fromHex("fbff");
+        QTest::newRow("padded-two") << QByteArray("-w==") << QByteArray::fromHex("fb");
+        QTest::newRow("padded-three") << QByteArray("-_8=") << QByteArray::fromHex("fbff");
+    }
+    void decodesLegacyHandles() {
+        QFETCH(QByteArray, handle);
+        QFETCH(QByteArray, expected);
+        const auto credential = handle + ",047890abcdef";
+        const QByteArray mapping = "alice:" + credential + '\n';
+        Registry registry(mapping, "alice");
+        QCOMPARE(decodeCredentialHandle(registry.keys()[0].credential), expected);
+        QCOMPARE(registry.keys()[0].credential, credential);
+        QCOMPARE(registry.keys()[0].id, Registry::fingerprint(credential));
+        QCOMPARE(registry.revision(), Registry::fingerprint(mapping));
+    }
+    void rejectsInvalidHandlesAndKeepsModernDecodingStrict() {
+        QCOMPARE(decodeCredentialHandle(one), QByteArray("hello"));
+        QCOMPARE(decodeCredentialHandle("+///,cHVibGlj,es256,+presence"), QByteArray::fromHex("fbffff"));
+        QVERIFY_EXCEPTION_THROWN(decodeCredentialHandle("-___,cHVibGlj,es256,+presence"), Failure);
+        QVERIFY_EXCEPTION_THROWN(decodeCredentialHandle("a,047890abcdef"), Failure);
+        QVERIFY_EXCEPTION_THROWN(decodeCredentialHandle("a=bc,047890abcdef"), Failure);
+        QVERIFY_EXCEPTION_THROWN(decodeCredentialHandle("bad"), Failure);
+    }
     void preservesOtherUsersAndExistingKeys() {
         const auto data = "# mapping\nother:" + three + "\nalice:" + one + ':' + two + "\n";
         Registry r(data,"alice"); const auto updated = r.add(three);
