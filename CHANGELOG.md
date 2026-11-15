@@ -10,8 +10,8 @@
 - Mark existing registrations that unlock sudo without a touch.
 - List and remove resident registrations instead of rejecting the whole row.
 - Refuse rows that pam-u2f would read differently than Keymarchy shows them.
-- Check the polkit PAM rules as well, and list other services that read the
-  registration file.
+- Check the polkit PAM rules as well, and list other readable PAM files that
+  directly mention the registration file.
 - Keep listing and removing keys when the names file is damaged.
 - Keep the current operation's backup and the nine newest other backups, even
   after a clock correction, and leave none behind when a change is refused.
