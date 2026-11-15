@@ -20,8 +20,11 @@ This builds, tests, and installs an Arch package. Open **Keymarchy** in the app
 launcher (`Super + Space`), or run `keymarchy open`.
 
 Dependencies include Qt 6 base, declarative, SVG and Wayland, pam-u2f,
-libfido2, and polkit. Building needs GCC, make, pkgconf, and qmake6.
-The PKGBUILD in `pkgbuild/` lists all runtime, build, and test dependencies.
+libfido2, and polkit. Building needs Arch's `base-devel` tools and qmake6
+(provided by `qt6-base`). Run the installer as your regular user; `makepkg`
+asks for administrator authentication to install dependencies and the package.
+The PKGBUILD in `pkgbuild/` declares runtime and additional build and test
+dependencies.
 Source archives are available on the [releases page](https://github.com/Razumasu/keymarchy/releases).
 Extract an archive and run `./bin/install` inside it to install a specific release.
 This installation does not enable FIDO2 or change your PAM configuration.
@@ -30,14 +33,26 @@ The [Omarchy package submission](https://github.com/omacom/omarchy-pkgs/pull/277
 is pending review. The AUR package is not published yet. Until the packages are
 available, use the source installation above.
 
+To update a clone on the `main` branch, run these commands from its directory:
+
+```sh
+git pull --ff-only
+./bin/install
+```
+
+This installs the current source from `main`. To stay on released versions,
+download the latest release archive instead. Install the complete package:
+the app needs its matching privileged helper and polkit policy.
+
 ## Use
 
 - **Add key:** connect only the key to enroll, choose a name, approve the system
   authentication prompt, and touch the key when it flashes.
 - **Identify and rename:** plug in a key. Its registration shows **Connected**
-  and is highlighted automatically, usually within three seconds. Use Rename
+  and is highlighted when identified, with checks every three seconds. Use Rename
   to give it a name such as Everyday, Travel, or Backup at home. Unplug it and
-  plug in the next key to name the rest. No touch or password is needed for detection.
+  plug in the next key to name the rest. Detection does not ask for a touch or
+  password; keys that cannot be identified silently show an unknown state.
 - **Remove:** choose a registration and confirm. Before removing the last key,
   disconnect all keys and check that `sudo -k -v` accepts your password.
 - **Refresh:** reload registrations changed by another tool.
@@ -45,32 +60,48 @@ available, use the source installation above.
 Keymarchy manages the standard Omarchy FIDO2 setup, using `/etc/fido2/fido2`.
 If FIDO2 has never been configured, first enroll a key through Omarchy's
 **Setup > Security > FIDO2** menu. Keymarchy then manages additional keys.
-The supported sudo authentication stack is `pam_u2f.so` marked `sufficient`,
-followed by `auth include system-auth`, with no additional authentication rules.
+The supported sudo authentication rules, in order, are:
+
+```text
+auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2
+auth include system-auth
+```
+
+These describe the configuration Keymarchy expects; use Omarchy's setup menu
+to configure it. Normal account, password, and session rules are allowed,
+but additional authentication rules are not.
 Custom rule order, origins, authfile paths, and pam-u2f defaults are rejected.
-`/etc/pam.d/polkit-1` must follow the same pattern, or use only
+If `/etc/pam.d/polkit-1` exists, it must follow the same pattern, or use only
 `auth include system-auth` for authentication. Custom authentication includes
 and substacks are rejected, even when they do not mention pam-u2f directly.
-Other PAM services that read the registration file are listed as a notice;
-Keymarchy does not check their rules.
+Other readable PAM files that directly mention `/etc/fido2/fido2` are listed
+as a notice. Keymarchy does not follow their includes or check their rules,
+so the notice is not a complete inventory of services that use the file.
 This configuration check cannot verify your password or the included
 `system-auth` policy; test password authentication before removing your last key.
 
 Existing registrations have no device name or serial number. They initially
 appear as Key 1, Key 2, etc., in file order, with a stable registration fingerprint.
 Those generated numbers can change after removal; assign names before relying
-on them. A registration marked **No touch required** unlocks sudo while its key
-  is merely plugged in; Keymarchy never creates one, so remove it unless you added
-  it on purpose. A fingerprint identifies a *registration*, not a physical device.
+on them. A registration marked **No touch required** does not request a
+presence touch, but may still require a PIN or biometric verification. If it
+requires neither, a connected key can authenticate without user interaction.
+Keymarchy creates only registrations that require a touch.
+See [pam-u2f's authentication options](https://developers.yubico.com/pam-u2f/)
+for the distinction between presence, PIN, and user verification.
+
+A fingerprint identifies a *registration*, not a physical device.
 The same physical key can have multiple registrations; all matching entries
 are highlighted when it is connected. Multiple connected keys are supported.
-If none match, the app reports an unregistered key. If a key cannot be queried
-(for example, because it requires verification or another app is using it),
+If all checks finish without a match, the app reports an unregistered key.
+If a key cannot be queried (for example, because it requires verification or
+another app is using it),
 the app shows an unknown state rather than claiming it is disconnected.
 
 Resident (discoverable) registrations made with `pamu2fcfg -r` can be named and
 removed, but not detected as connected. A key that asks for its PIN during
 enrollment cannot be added yet.
+Keymarchy allows up to 24 registrations per user.
 
 Adding a key enrolls it; it is not a sudo authentication test. To verify it,
 leave only that key connected and run `sudo -k -v`, then touch it when prompted.
@@ -88,13 +119,28 @@ keymarchy rename FULL_REGISTRATION_ID "Travel key" --json
 keymarchy remove FULL_REGISTRATION_ID --yes --json
 ```
 
-The `list` output includes `connection` (`connected`, `disconnected`, or `unknown`)
-and matching device descriptions, `touch` (false when sudo does not ask for a
-touch), and a `notice` with warnings that do not block changes. Use the full ID
-returned by `list`. Commands run without a display; an addition or removal
-invokes `pkexec`, which may use a graphical authentication agent or a terminal
+`list --json` returns an object with these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `keys` | Registrations with `id`, `shortId`, `name`, `connection`, `touch`, and matching `devices` after a scan. |
+| `problem` | A configuration or file error that blocks adding and removing registrations. Empty when no such error was found. |
+| `notice` | Warnings, such as unreadable saved names or other services sharing the file. A warning does not by itself block registration changes. |
+| `detectionError` | An error from an attempted connected-key scan. Empty if no scan failure was reported; check `problem` as well. |
+
+After a scan, `connection` is `connected`, `disconnected`, or `unknown`.
+If `problem` prevents scanning, entries can still say `checking` and omit
+`devices`; do not use them to identify a physical key. `touch: false` describes
+the presence-touch requirement only, not PIN or biometric requirements.
+Use the full `id` returned by `list` for renaming or removal.
+
+Commands run without a display; an addition or removal invokes `pkexec`,
+which may use a graphical authentication agent or a terminal
 prompt. Run as your regular user. Exit status is 0 on success,
-1 on failure. With `--json`, stdout contains JSON and progress/errors go to stderr.
+1 on failure. Rename, add, and remove return `ok` and `message` with `--json`;
+progress and errors go to stderr. Invalid command syntax is reported on stderr
+without a JSON result. `list` exits with 1 for a `problem` or `detectionError`;
+an `unknown` connection alone does not make it fail.
 
 `keymarchy skill install` installs the bundled agent instructions under
 `~/.agents/skills/keymarchy/`.
@@ -111,6 +157,7 @@ prompt. Run as your regular user. Exit status is 0 on success,
 | ? | Show shortcuts |
 | Q | Quit |
 
+Space activates a focused button instead of opening Add key.
 Typing in a dialog does not activate these shortcuts. The window stays open
 while an operation is in progress. Close the system authentication prompt to
 decline a change. While the key waits for a touch, Cancel asks the helper to
@@ -142,9 +189,13 @@ administrator should inspect it before replacing the current file.
 Existing names from Keykeep are read automatically if no Keymarchy names file
 exists. The next name edit copies them into the new location.
 
-Names are stored separately in `~/.local/share/keymarchy/labels.json`, keyed by
-registration fingerprint. They are descriptive and have no authentication role.
+Names are stored separately in `~/.local/share/keymarchy/labels.json`
+(or `$XDG_DATA_HOME/keymarchy/labels.json` when set), keyed by registration
+fingerprint. They are descriptive and have no authentication role.
 Removal keeps the label so restoring a registration also restores its name.
+If the names file is damaged, registrations can still be listed and removed.
+If enrollment succeeds but saving its name fails, the key remains registered;
+repair the names file and rename that registration instead of enrolling it again.
 There is no automatic undo of an authentication change.
 
 ## Connected-key detection
@@ -183,4 +234,6 @@ Atomic name storage uses [Qt QSaveFile](https://doc.qt.io/qt-6/qsavefile.html).
 Theme and translation templates are adapted from the Omarchy app conventions
 (MIT, David Heinemeier Hansson).
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and release steps.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributing, checks, and release steps.
+Keymarchy is maintained by [Razu](https://github.com/Razumasu) and released under
+the [MIT license](LICENSE).
