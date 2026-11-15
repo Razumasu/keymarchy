@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtQuick.Templates as T
 
 ApplicationWindow {
     id: win
@@ -18,7 +19,8 @@ ApplicationWindow {
     onClosing: function(close) { if (backend.busy) { close.accepted = false; busyDialog.open() } }
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: helpDialog.open() }
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; enabled: !win.editing; onActivated: win.close() }
-    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.editing && !backend.busy && !backend.problem; onActivated: win.openName(false) }
+    // Space on a focused button must press that button, not start an enrollment.
+    Shortcut { sequence: "Space"; context: Qt.ApplicationShortcut; enabled: !win.editing && !backend.busy && !backend.problem && !(win.activeFocusItem instanceof T.AbstractButton); onActivated: win.openName(false) }
     Shortcut { sequence: "Ctrl+N"; context: Qt.ApplicationShortcut; enabled: !win.editing && !backend.busy && !backend.problem; onActivated: win.openName(false) }
     Shortcut { sequence: "F2"; context: Qt.ApplicationShortcut; enabled: !win.editing && !backend.busy && win.selected !== null; onActivated: win.openName(true) }
     Shortcut { sequence: "Delete"; context: Qt.ApplicationShortcut; enabled: !win.editing && !backend.busy && !backend.problem && win.selected !== null; onActivated: win.openRemove() }
@@ -65,16 +67,20 @@ ApplicationWindow {
                     Label { text: { translator.language; return qsTr("%n registered key(s)", "", backend.keys.length) } color: "#a3aaa8" }
                 }
                 Item { Layout.fillWidth: true }
-                Button { text: qsTr("Refresh"); enabled: !backend.busy; onClicked: backend.refresh() }
+                Button { objectName: "refreshButton"; text: qsTr("Refresh"); enabled: !backend.busy; onClicked: backend.refresh() }
                 Button { objectName: "addButton"; text: qsTr("Add key"); highlighted: true; background: Rectangle { color: parent.enabled ? theme.accent : "#454b48"; radius: Math.min(6, theme.radius) } contentItem: Text { text: parent.text; font: parent.font; color: theme.accentForeground; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter } enabled: !backend.busy && !backend.problem; onClicked: win.openName(false) }
             }
             Label {
                 Layout.fillWidth: true; visible: !!backend.problem
-                text: backend.problem; wrapMode: Text.WordWrap; color: "#f3b794"
+                text: backend.problem; wrapMode: Text.WordWrap; color: "#f3b794"; textFormat: Text.PlainText
                 Accessible.role: Accessible.AlertMessage
             }
             Label {
-                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                Layout.fillWidth: true; visible: !!backend.notice
+                text: backend.notice; wrapMode: Text.WordWrap; color: "#f3b794"; font.pixelSize: 12; textFormat: Text.PlainText
+            }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.WordWrap; textFormat: Text.PlainText
                 text: backend.connectionMessage; color: "#a3aaa8"; font.pixelSize: 12
                 visible: text.length > 0
             }
@@ -105,6 +111,7 @@ ApplicationWindow {
                                     color: modelData.connection === "connected" ? theme.accent : "#929c98"
                                     font.pixelSize: 12; font.bold: modelData.connection === "connected"
                                 }
+                                Label { objectName: "touchBadge"; visible: modelData.touch === false; text: qsTr("No touch required"); color: "#f3b794"; font.pixelSize: 12; font.bold: true }
                                 Label { text: modelData.shortId; color: "#929c98"; font.pixelSize: 12; font.family: "monospace"; elide: Text.ElideRight; Layout.fillWidth: true }
                             }
                         }
@@ -125,7 +132,7 @@ ApplicationWindow {
                         text: backend.message || qsTr("Use names like “Everyday” or “Backup” to tell your keys apart.")
                         color: backend.busy ? theme.accent : "#bac2bf"
                     }
-                    Button { text: qsTr("Cancel"); visible: backend.busy && backend.phase !== "authorize"; onClicked: backend.cancel() }
+                    Button { text: qsTr("Cancel"); visible: backend.busy && (backend.phase === "detect" || backend.phase === "touch"); onClicked: backend.cancel() }
                 }
             }
             Label {
@@ -145,7 +152,7 @@ ApplicationWindow {
         onAccepted: { if (renaming) backend.rename(keyId, nameField.text); else backend.add(nameField.text) }
         ColumnLayout {
             width: parent.width; spacing: 16
-            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: !nameDialog.renaming; text: qsTr("Connect only the key you want to add. You’ll touch it to enroll, then approve a system prompt to save.") }
+            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: !nameDialog.renaming; text: qsTr("Connect only the key you want to add. You’ll approve a system prompt, then touch the key to enroll it.") }
             TextField { id: nameField; objectName: "nameField"; Layout.fillWidth: true; placeholderText: qsTr("Key name"); maximumLength: 80; onTextChanged: { if (nameDialog.visible) nameDialog.standardButton(Dialog.Ok).enabled = text.trim().length > 0 } onAccepted: { if (text.trim().length) nameDialog.accept() } }
         }
     }

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- pkexec picks the action by the helper's path and first argument, so adding
+     and removing a key show different prompts. Authentication is never kept:
+     every change needs a new one. -->
+<policyconfig>
+  <vendor>Keymarchy</vendor>
+  <vendor_url>https://github.com/Razumasu/keymarchy</vendor_url>
+  <icon_name>keymarchy</icon_name>
+  <action id="io.github.razumasu.keymarchy.add">
+    <description>Add a security key for sudo</description>
+    <description xml:lang="da">Tilføj en sikkerhedsnøgle til sudo</description>
+    <message>Authentication is required to add a security key that can unlock sudo</message>
+    <message xml:lang="da">Der kræves godkendelse for at tilføje en sikkerhedsnøgle, der kan låse sudo op</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/keymarchy/keymarchy-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">add</annotate>
+  </action>
+  <action id="io.github.razumasu.keymarchy.remove">
+    <description>Remove a security key from sudo</description>
+    <description xml:lang="da">Fjern en sikkerhedsnøgle fra sudo</description>
+    <message>Authentication is required to remove a security key from sudo</message>
+    <message xml:lang="da">Der kræves godkendelse for at fjerne en sikkerhedsnøgle fra sudo</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/keymarchy/keymarchy-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">remove</annotate>
+  </action>
+</policyconfig>

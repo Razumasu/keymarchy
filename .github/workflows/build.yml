@@ -49,5 +49,7 @@ jobs:
           if grep -q ' E: ' /tmp/namcap.log; then exit 1; fi
           pacman -U --noconfirm keymarchy-*.pkg.tar.zst
           keymarchy --help
+          test -x /usr/lib/keymarchy/keymarchy-helper
+          test -f /usr/share/polkit-1/actions/io.github.razumasu.keymarchy.policy
           test -f /usr/share/applications/keymarchy.desktop
           test -f /usr/share/icons/hicolor/scalable/apps/keymarchy.svg

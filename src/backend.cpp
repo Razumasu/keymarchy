@@ -4,15 +4,20 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <memory>
+
+static const QString helperPath = QStringLiteral("/usr/lib/keymarchy/keymarchy-helper");
 
 Backend::Backend(bool demo, QObject *parent) : QObject(parent), m_demo(demo) {
     m_labelPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/labels.json";
     m_timeout.setSingleShot(true);
     connect(&m_timeout, &QTimer::timeout, this, [this] {
-        if (m_process) m_process->kill();
+        // The helper runs as root and cannot be killed; closing its input stops a pending enrollment.
+        if (m_process) { m_process->closeWriteChannel(); m_process->kill(); }
         finish(false, tr("The operation timed out. Refresh before trying again."));
     });
     m_scanTimeout.setSingleShot(true);
@@ -54,7 +59,11 @@ Backend::Backend(bool demo, QObject *parent) : QObject(parent), m_demo(demo) {
     });
     refresh();
 }
-Backend::~Backend() { pauseDetection(); if (m_process) { m_process->disconnect(this); m_process->kill(); m_process->waitForFinished(1000); } }
+Backend::~Backend() {
+    pauseDetection();
+    // The helper cannot be killed once it runs as root; closing its input makes it stop waiting for a touch.
+    if (m_process) { m_process->disconnect(this); m_process->closeWriteChannel(); m_process->kill(); m_process->waitForFinished(1000); }
+}
 QJsonObject Backend::labels() const {
     const auto path = labelReadPath(m_labelPath, QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/keykeep/labels.json");
     if (path.isEmpty()) return {};
@@ -81,7 +90,7 @@ void Backend::refresh() {
     if (m_busy) return;
     pauseDetection();
     m_scanToken.clear();
-    m_keys.clear(); m_problem.clear();
+    m_keys.clear(); m_problem.clear(); m_notice.clear();
     if (m_demo) {
         int n = 1;
         for (const auto &name : {tr("Everyday key"), tr("Travel key"), tr("Backup at home")}) {
@@ -90,16 +99,22 @@ void Backend::refresh() {
         m_connectionMessage = tr("Connected keys are highlighted. Rename one to give it a memorable name.");
         emit changed(); return;
     }
+    // Names are only descriptive: without them the keys can still be listed and removed.
+    QJsonObject names;
+    QStringList notices;
+    try { names = labels(); } catch (const std::exception &e) { notices.append(QString::fromUtf8(e.what())); }
+    const auto others = otherFidoServices();
+    if (!others.isEmpty()) notices.append(tr("These services also use your registrations, and Keymarchy does not check their settings: %1").arg(others.join(", ")));
+    m_notice = notices.join('\n');
     try {
         m_problem = checkConfiguration();
         const Registry registry(readFile("/etc/fido2/fido2"), currentUser());
         m_revision = registry.revision();
-        const auto names = labels();
         int n = 1;
         for (const auto &key : registry.keys()) {
             auto name = names.value(key.id).toString();
             if (name.isEmpty()) name = tr("Key %1").arg(n);
-            m_keys.append(QVariantMap{{"id",key.id},{"name",name},{"shortId",key.id.left(12)},{"connection","checking"}});
+            m_keys.append(QVariantMap{{"id",key.id},{"name",name},{"shortId",key.id.left(12)},{"connection","checking"},{"touch",key.touch}});
             ++n;
         }
     } catch (const std::exception &e) { if (m_problem.isEmpty()) m_problem = QString::fromUtf8(e.what()); }
@@ -141,20 +156,61 @@ void Backend::start(const QString &program, const QStringList &args, int timeout
     p->closeWriteChannel();
     m_timeout.start(timeout);
 }
-void Backend::save(const QJsonObject &request, std::function<void()> after) {
+void Backend::privileged(const QString &action, const QJsonObject &request, std::function<void(const QJsonObject &)> after) {
     if (m_demo) { finish(false, tr("Preview mode does not change registrations.")); return; }
-    if (!QFileInfo::exists("/usr/bin/keymarchy")) throw Failure(tr("Install Keymarchy before changing registrations."));
+    if (!QFileInfo::exists(helperPath)) throw Failure(tr("Install Keymarchy before changing registrations."));
     m_phase = "authorize";
-    m_message = tr("Approve the system authentication prompt to save the change."); emit changed();
-    start("/usr/bin/pkexec", {"/usr/bin/keymarchy", "--helper"}, 120000, [this,after](QByteArray out) {
-        const auto response = QJsonDocument::fromJson(out).object();
-        if (!response.value("ok").toBool()) throw Failure(tr("No confirmation received. Refresh to check the registration."));
-        const auto backup = response.value("backup").toString();
-        try { after(); } catch (const std::exception &e) {
-            finish(true, tr("Registration saved, but its name could not be saved: %1").arg(QString::fromUtf8(e.what()))); return;
+    m_message = action == "add" ? tr("Approve the system authentication prompt. You will then touch the key to enroll it.")
+                                : tr("Approve the system authentication prompt to save the change.");
+    emit changed();
+    auto *p = new QProcess(this);
+    m_process = p;
+    // The helper writes one JSON object per line: progress first, then the result.
+    auto pending = std::make_shared<QByteArray>();
+    auto result = std::make_shared<QJsonObject>();
+    const auto consume = [this,p,pending,result] {
+        pending->append(p->readAllStandardOutput());
+        for (auto end = pending->indexOf('\n'); end >= 0; end = pending->indexOf('\n')) {
+            const auto line = QJsonDocument::fromJson(pending->left(end)).object();
+            pending->remove(0, end + 1);
+            if (line.contains("ok")) *result = line;
+            else if (line.value("phase").toString() == "touch" && m_process == p && m_busy && m_phase == "authorize") {
+                // Authentication is done; the helper gives up on the touch by itself after 30 seconds.
+                m_phase = "touch"; m_message = tr("Touch your security key when it flashes.");
+                m_timeout.start(45000); emit changed();
+            }
         }
-        finish(true, tr("Saved. Backup: %1").arg(backup));
-    }, QJsonDocument(request).toJson(QJsonDocument::Compact));
+    };
+    connect(p, &QProcess::readyReadStandardOutput, this, consume);
+    connect(p, &QProcess::errorOccurred, this, [this,p](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart && m_process == p) {
+            m_process = nullptr; p->deleteLater(); finish(false, tr("Could not start %1.").arg(p->program()));
+        }
+    });
+    connect(p, &QProcess::finished, this, [this,p,consume,result,after](int code, QProcess::ExitStatus status) {
+        const bool active = m_process == p;
+        if (active) { m_process = nullptr; m_timeout.stop(); }
+        consume();
+        p->deleteLater();
+        if (!active || !m_busy) return;
+        if (code == 0 && status == QProcess::NormalExit && result->value("ok").toBool()) {
+            try { after(*result); } catch (const std::exception &e) {
+                finish(true, tr("Registration saved, but its name could not be saved: %1").arg(QString::fromUtf8(e.what()))); return;
+            }
+            finish(true, tr("Saved. Backup: %1").arg(result->value("backup").toString()));
+        } else if (!result->value("error").toString().isEmpty()) {
+            // The helper reports untranslated text; show it in the user's language.
+            QStringList args;
+            for (const auto &arg : result->value("args").toArray()) args.append(arg.toString());
+            finish(false, appText(result->value("error").toString().toUtf8().constData(), args));
+        } else if (code == 126 || code == 127 || status != QProcess::NormalExit) {
+            finish(false, tr("Operation cancelled or authentication denied."));
+        } else finish(false, tr("No confirmation received. Refresh to check the registration."));
+    });
+    p->start("/usr/bin/pkexec", {helperPath, action});
+    // The write channel stays open: closing it tells the helper to stop waiting for a touch.
+    p->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
+    m_timeout.start(120000);
 }
 void Backend::add(const QString &name) {
     if (m_busy) return;
@@ -166,17 +222,15 @@ void Backend::add(const QString &name) {
         pauseDetection();
         m_busy = true; m_phase = "detect"; m_message = tr("Checking for a connected security key…"); emit changed();
         const auto revision = m_revision;
+        // Checked here only to avoid a pointless authentication prompt; the helper checks again.
         start("/usr/bin/fido2-token", {"-L"}, 10000, [this,label,revision](QByteArray output) {
             const auto devices = QString::fromUtf8(output).trimmed().split('\n', Qt::SkipEmptyParts);
             if (devices.size() != 1) throw Failure(tr("Connect only the key you want to add, then try again."));
-            m_phase = "touch"; m_message = tr("Touch your security key when it flashes."); emit changed();
-            start("/usr/bin/pamu2fcfg", {"-n"}, 40000, [this,label,revision](QByteArray output) {
-                auto credential = output.trimmed();
-                if (!credential.startsWith(':')) throw Failure(tr("Enrollment returned an invalid registration."));
-                credential.remove(0,1); Registry::validateCredential(credential);
-                const auto id = Registry::fingerprint(credential);
-                save({{"action","add"},{"revision",revision},{"credential",QString::fromLatin1(credential)}},
-                     [this,id,label] { saveLabel(id,label); });
+            // The helper enrolls the key itself, so no registration is passed to it.
+            privileged("add", {{"revision",revision}}, [this,label](const QJsonObject &response) {
+                const auto id = response.value("id").toString();
+                if (id.size() != 64) throw Failure(tr("Cannot save key names."));
+                saveLabel(id, label);
             });
         });
     } catch (const std::exception &e) { finish(false, QString::fromUtf8(e.what())); }
@@ -188,7 +242,7 @@ void Backend::remove(const QString &id) {
         if (!exists(id)) throw Failure(tr("Select a registered key first."));
         pauseDetection();
         m_busy = true;
-        save({{"action","remove"},{"revision",m_revision},{"id",id}}, [] {});
+        privileged("remove", {{"revision",m_revision},{"id",id}}, [](const QJsonObject &) {});
     } catch (const std::exception &e) { finish(false, QString::fromUtf8(e.what())); }
 }
 void Backend::rename(const QString &id, const QString &name) {
@@ -200,8 +254,15 @@ void Backend::rename(const QString &id, const QString &name) {
     } catch (const std::exception &e) { finish(false, QString::fromUtf8(e.what())); }
 }
 void Backend::cancel() {
-    // A privileged save may already have committed; never present cancellation as a rollback.
-    if (!m_busy || m_phase == "authorize") return;
+    if (!m_busy) return;
+    if (m_phase == "touch") {
+        // The helper may already be saving. Ask it to stop and report what it actually did.
+        if (m_process) m_process->closeWriteChannel();
+        m_phase = "cancelling"; m_message = tr("Cancelling…"); emit changed();
+        return;
+    }
+    // The authentication prompt has its own Cancel.
+    if (m_phase != "detect") return;
     if (m_process) { auto *p = m_process; m_process = nullptr; p->kill(); }
     finish(false, tr("Enrollment cancelled. No registration was added."));
 }

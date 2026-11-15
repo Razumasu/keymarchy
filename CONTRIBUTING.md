@@ -7,8 +7,10 @@ GitHub Actions builds, tests, installs, and inspects the package in a clean
 Arch Linux container as well.
 
 Keep registration writes in the privileged helper and run the interface as a
-regular user. Changes to registration parsing, persistence, or device detection
-need focused tests. Changes to dialogs should exercise the real QML offscreen.
+regular user. The helper must not take a registration from its caller, and it
+should link nothing beyond QtCore. Changes to registration parsing, persistence,
+or device detection need focused tests. Changes to dialogs should exercise the
+real QML offscreen.
 Describe which keys or environments you used for hardware checks; automated
 tests do not replace testing with real authenticators.
 

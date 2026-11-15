@@ -13,6 +13,7 @@
 #include "registry.h"
 #include "presence.h"
 #include "store.h"
+#include "enroll.h"
 #include "backend.h"
 #include "theme.h"
 #include "translator.h"
@@ -25,9 +26,17 @@ class KeymarchyTests : public QObject {
     static void write(const QString &path, const QByteArray &data) {
         QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); QCOMPARE(f.write(data), data.size());
     }
-    static QJsonObject request(const QByteArray &data, const QString &action, const QByteArray &credential = three) {
-        return {{"revision",Registry::fingerprint(data)},{"action",action},{"credential",QString::fromLatin1(credential)}};
+    static QJsonObject request(const QByteArray &data, const QString &action) {
+        return {{"revision",Registry::fingerprint(data)},{"action",action}};
     }
+    static QByteArray enrollThree() { return three; }
+    static QString script(const QTemporaryDir &dir, const QString &name, const QByteArray &body) {
+        const auto path = dir.filePath(name);
+        write(path, "#!/bin/sh\n" + body + "\n");
+        QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        return path;
+    }
+    static int backups(const QTemporaryDir &dir) { return QDir(dir.path()).entryList({"fido2.backup.*"}, QDir::Files | QDir::Hidden).size(); }
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
     void acceptsStandardPamConfiguration() {
@@ -69,6 +78,37 @@ private slots:
     void rejectsCustomPamDefaults() {
         const QString pam = "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\nauth include system-auth\n";
         QVERIFY(!checkPamConfiguration(pam, "# default overrides\norigin=custom\n").isEmpty());
+    }
+    void acceptsOnlyStandardPolkitStacks() {
+        const QString standard = "auth      sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\nauth      include system-auth\n\n"
+                                 "account   include system-auth\npassword  include system-auth\nsession   include system-auth\n";
+        QVERIFY(checkPolkitConfiguration(standard).isEmpty());
+        QVERIFY(checkPolkitConfiguration("#%PAM-1.0\nauth include system-auth\naccount include system-auth\n").isEmpty());
+        QVERIFY(checkPolkitConfiguration("# auth sufficient pam_u2f.so nouserok\nauth include system-auth\n").isEmpty());
+        QVERIFY(checkPolkitConfiguration("  auth\tinclude system-auth # password\r\n-session optional pam_systemd.so\n").isEmpty());
+        QVERIFY(!checkPolkitConfiguration("auth required pam_u2f.so cue authfile=/etc/fido2/fido2\nauth include system-auth\n").isEmpty());
+        QVERIFY(!checkPolkitConfiguration("auth sufficient pam_u2f.so cue nouserok authfile=/etc/fido2/fido2\nauth include system-auth\n").isEmpty());
+        QVERIFY(!checkPolkitConfiguration(standard + "auth required pam_deny.so\n").isEmpty());
+    }
+    void rejectsUnknownPolkitStacks_data() {
+        QTest::addColumn<QString>("pam");
+        QTest::newRow("indirect-fido-include") << "auth include custom-fido\naccount include system-auth\n";
+        QTest::newRow("indirect-fido-substack") << "auth substack custom-fido\nauth include system-auth\n";
+        QTest::newRow("include-directive") << "@include custom-fido\n";
+        QTest::newRow("extra-rule") << "auth required pam_deny.so\nauth include system-auth\n";
+        QTest::newRow("duplicate-password") << "auth include system-auth\nauth include system-auth\n";
+        QTest::newRow("comments-only") << "# auth sufficient pam_u2f.so authfile=/etc/fido2/fido2\n";
+    }
+    void rejectsUnknownPolkitStacks() {
+        QFETCH(QString, pam);
+        QVERIFY(!checkPolkitConfiguration(pam).isEmpty());
+    }
+    void reportsOtherServicesUsingTheRegistrations() {
+        QTemporaryDir dir;
+        write(dir.filePath("login"), "auth sufficient pam_u2f.so cue authfile=/etc/fido2/fido2\nauth include system-auth\n");
+        write(dir.filePath("commented"), "# auth sufficient pam_u2f.so authfile=/etc/fido2/fido2\nauth include system-auth\n");
+        write(dir.filePath("own-file"), "auth sufficient pam_u2f.so cue\n");
+        QCOMPARE(otherFidoServices(dir.path()), QStringList{"login"});
     }
     void decodesLegacyHandles_data() {
         QTest::addColumn<QByteArray>("handle");
@@ -129,37 +169,192 @@ private slots:
         QVERIFY_EXCEPTION_THROWN(r.add(one),Failure);
         QVERIFY_EXCEPTION_THROWN(Registry("","bad:name"),Failure);
     }
+    void matchesUserRowsLikePamU2f() {
+        // pam_u2f skips leading colons and uses the last line naming the user.
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:"+one+"\n:alice:"+two+"\n","alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry(":alice:"+two+"\n","alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("::alice:"+two+"\n","alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:"+one+"\nalice\n","alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry("alice\n","alice"),Failure);
+        QVERIFY_EXCEPTION_THROWN(Registry(QByteArray("alice\0x:",8)+one+"\n","alice"),Failure);
+        QCOMPARE(Registry("alice:"+one+"\n:bob:"+two+"\nalicia:"+three+"\n alice:"+three+"\n","alice").keys().size(),1);
+    }
+    void addsOnlyTouchRequiredEnrollmentOutput() {
+        Registry r("alice:"+one+"\n","alice");
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ=,cHVibGlj,es256,"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ=,cHVibGlj,es256,+pin"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ=,cHVibGlj,es256,+verification+pin"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ=,cHVibGlj,es256,+presence+presence"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("*,cHVibGlj,es256,+presence"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("0123abcd,4567efab"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ,cHVibGlj,es256,+presence"),Failure);
+        QVERIFY_EXCEPTION_THROWN(r.add("d29ybGQ=,cHVibGlj,es256,+presence,extra"),Failure);
+        QCOMPARE(Registry(r.add(two),"alice").keys().size(),2);
+        QCOMPARE(Registry(r.add("d29ybGQ=,cHVibGlj,eddsa,+presence+verification+pin"),"alice").keys().size(),2);
+    }
+    void listsTouchlessAndResidentRegistrations() {
+        const QByteArray touchless = "d29ybGQ=,cHVibGlj,es256,", pinOnly = "dGhpcmQ=,cHVibGlj,es256,+pin", resident = "*,cHVibGlj,es256,+presence+pin";
+        Registry r("alice:"+one+':'+touchless+':'+pinOnly+':'+resident+":0123abcd,4567efab\n","alice");
+        const auto keys = r.keys();
+        QCOMPARE(keys.size(),5);
+        QVERIFY(keys[0].touch); QVERIFY(!keys[1].touch); QVERIFY(!keys[2].touch); QVERIFY(keys[3].touch); QVERIFY(keys[4].touch);
+        QVERIFY(keys[3].resident); QVERIFY(!keys[0].resident); QVERIFY(!keys[4].resident);
+        // Existing registrations stay untouched while another one is removed.
+        QCOMPARE(r.remove(keys[1].id), QByteArray("alice:"+one+':'+pinOnly+':'+resident+":0123abcd,4567efab\n"));
+        QVERIFY_EXCEPTION_THROWN(Registry("alice:*,4567efab\n","alice"),Failure);
+    }
     void supportsLegacyRecords() { Registry r("alice:0123abcd,4567efab\n","alice"); QCOMPARE(r.keys().size(),1); }
     void enforcesLimit() {
         Registry r("alice:\n","alice"); QByteArray data;
-        for (int i=0;i<24;++i) { data=r.add(QByteArray::number(i)+",abcdef,es256,+presence"); r=Registry(data,"alice"); }
+        for (int i=0;i<24;++i) { data=r.add(QByteArray::number(i).toBase64()+",cHVibGlj,es256,+presence"); r=Registry(data,"alice"); }
         QVERIFY_EXCEPTION_THROWN(r.add(three),Failure);
     }
     void savesBackupAndPermissions() {
         QTemporaryDir dir; const auto original="alice:"+one+':'+two+"\n";
         write(dir.filePath("fido2"),original);
-        const auto result=applyRegistration(dir.path(),getuid(),"alice",request(original,"add"));
+        const auto result=applyRegistration(dir.path(),getuid(),"alice",request(original,"add"),enrollThree);
+        QCOMPARE(result.value("id").toString(),Registry::fingerprint(three));
         QCOMPARE(readFile(result.value("backup").toString()),original);
         const auto saved=readFile(dir.filePath("fido2")); QCOMPARE(Registry(saved,"alice").keys().size(),3);
         struct stat st{}; QVERIFY(stat(QFile::encodeName(dir.filePath("fido2")).constData(),&st)==0); QCOMPARE(st.st_mode & 0777,mode_t(0644));
         QVERIFY(stat(QFile::encodeName(result.value("backup").toString()).constData(),&st)==0); QCOMPARE(st.st_mode & 0777,mode_t(0600));
         auto rm=request(saved,"remove"); rm.insert("id",Registry::fingerprint(three));
-        applyRegistration(dir.path(),getuid(),"alice",rm);
+        QVERIFY(!applyRegistration(dir.path(),getuid(),"alice",rm).contains("id"));
         QCOMPARE(readFile(dir.filePath("fido2")),original);
+    }
+    void addsOnlyWhatEnrollmentReturns() {
+        QTemporaryDir dir; const auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
+        auto req=request(original,"add"); req.insert("credential",QString::fromLatin1(two));
+        // A registration in the request is ignored, and nothing is added without enrolling.
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",req),Failure);
+        QCOMPARE(readFile(dir.filePath("fido2")),original);
+        applyRegistration(dir.path(),getuid(),"alice",req,enrollThree);
+        QCOMPARE(readFile(dir.filePath("fido2")),QByteArray("alice:"+one+':'+three+"\n"));
+        const auto saved=readFile(dir.filePath("fido2"));
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(saved,"add"),[] { return QByteArray("d29ybGQ=,cHVibGlj,es256,"); }),Failure);
+        QCOMPARE(readFile(dir.filePath("fido2")),saved);
+    }
+    void doesNotAskForATouchItCannotSave() {
+        QTemporaryDir dir; bool asked=false; const Enroll enroll=[&] { asked=true; return three; };
+        const auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
+        auto stale=request(original,"add"); stale.insert("revision","stale");
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",stale,enroll),Failure);
+        QByteArray full="alice:";
+        for (int i=0;i<24;++i) full+=(i ? ":" : "")+QByteArray::number(i).toBase64()+",cHVibGlj,es256,+presence";
+        full+='\n'; write(dir.filePath("fido2"),full);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(full,"add"),enroll),Failure);
+        QVERIFY(!asked);
+    }
+    void leavesNoBackupWhenTheChangeIsRefused() {
+        QTemporaryDir dir; const auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
+        const auto changed="alice:"+one+':'+two+"\n";
+        // Another tool rewrites the file while the key waits for its touch.
+        const Enroll enroll=[&] { write(dir.filePath("fido2"),changed); return three; };
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add"),enroll),Failure);
+        QCOMPARE(readFile(dir.filePath("fido2")),changed);
+        QCOMPARE(QDir(dir.path()).entryList(QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot),QStringList({".keykeep.lock","fido2"}));
+    }
+    void keepsTheTenNewestBackups() {
+        QTemporaryDir dir; const auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
+        const auto now=QDateTime::currentDateTime();
+        for (int i=0;i<12;++i) {
+            const auto path=dir.filePath(QString("fido2.backup.old%1").arg(i,3,10,QChar('0')));
+            write(path,"old"); QFile f(path); QVERIFY(f.open(QIODevice::ReadWrite));
+            QVERIFY(f.setFileTime(now.addDays(-1-i),QFileDevice::FileModificationTime));
+        }
+        write(dir.filePath("fido2.backup.by-hand"),"mine");
+        const auto result=applyRegistration(dir.path(),getuid(),"alice",request(original,"add"),enrollThree);
+        QCOMPARE(backups(dir),11);
+        QVERIFY(QFile::exists(result.value("backup").toString()));
+        QVERIFY(QFile::exists(dir.filePath("fido2.backup.by-hand")));
+        QVERIFY(QFile::exists(dir.filePath("fido2.backup.old008")));
+        QVERIFY(!QFile::exists(dir.filePath("fido2.backup.old009")));
+        QVERIFY(!QFile::exists(dir.filePath("fido2.backup.old011")));
+    }
+    void keepsCurrentBackupAfterClockRollback_data() {
+        QTest::addColumn<QString>("action");
+        QTest::newRow("add") << "add";
+        QTest::newRow("remove") << "remove";
+    }
+    void keepsCurrentBackupAfterClockRollback() {
+        QFETCH(QString, action);
+        QTemporaryDir dir; const auto original="alice:"+one+"\n";
+        write(dir.filePath("fido2"),original);
+        const auto future=QDateTime::currentDateTime().addDays(1);
+        for (int i=0;i<10;++i) {
+            const auto path=dir.filePath(QString("fido2.backup.old%1").arg(i,3,10,QChar('0')));
+            write(path,"old"); QFile f(path); QVERIFY(f.open(QIODevice::ReadWrite));
+            QVERIFY(f.setFileTime(future.addSecs(i),QFileDevice::FileModificationTime));
+        }
+        auto req=request(original,action); req.insert("id",Registry::fingerprint(one));
+        const auto result=applyRegistration(dir.path(),getuid(),"alice",req,enrollThree);
+        QVERIFY(result.value("ok").toBool());
+        QVERIFY(QFile::exists(result.value("backup").toString()));
+        QCOMPARE(readFile(result.value("backup").toString()),original);
+        QCOMPARE(backups(dir),10);
+        QVERIFY(!QFile::exists(dir.filePath("fido2.backup.old000")));
+        QVERIFY(QFile::exists(dir.filePath("fido2.backup.old009")));
+    }
+    void enrollsTheOnlyConnectedKey() {
+        QTemporaryDir dir; Enrollment options; options.cancelFd=-1; bool ready=false; options.ready=[&] { ready=true; };
+        options.lister=script(dir,"list","echo '/dev/hidraw1: vendor=0x1050, product=0x0407 (Yubico YubiKey)'");
+        // Succeeds only for the expected arguments, a clean environment, no terminal and an unreadable stdin.
+        options.enroller=script(dir,"enroll","[ \"$*\" = '-n -u alice' ] || exit 2\n[ \"$PATH\" = /usr/bin ] || exit 3\n"
+                                             "[ -z \"$HOME$USER\" ] || exit 4\nif cat >/dev/null 2>&1; then exit 5; fi\n"
+                                             "if ( : </dev/tty ) 2>/dev/null; then exit 6; fi\nprintf ':" + three + "\\n'");
+        QCOMPARE(enrollCredential("alice",options),three);
+        QVERIFY(ready);
+        options.lister=script(dir,"list-two","echo one; echo two");
+        QVERIFY_EXCEPTION_THROWN(enrollCredential("alice",options),Failure);
+        options.lister=script(dir,"list-none","true");
+        QVERIFY_EXCEPTION_THROWN(enrollCredential("alice",options),Failure);
+    }
+    void reportsEnrollmentFailures() {
+        QTemporaryDir dir; Enrollment options; options.cancelFd=-1;
+        options.lister=script(dir,"list","echo key");
+        const auto failure=[&](const QByteArray &body) {
+            options.enroller=script(dir,"enroll",body);
+            try { enrollCredential("alice",options); } catch (const Failure &e) { return e.source; }
+            return QString("no failure");
+        };
+        QVERIFY(failure("echo 'Enter PIN for /dev/hidraw1: error: failed to read pin' >&2; exit 1").contains("PIN"));
+        QVERIFY(failure("echo 'error: fido_dev_make_cred (54) FIDO_ERR_PIN_REQUIRED' >&2; exit 1").contains("PIN"));
+        QVERIFY(failure("echo 'error: fido_dev_make_cred (39) FIDO_ERR_ACTION_TIMEOUT' >&2; exit 1").startsWith("Enrollment failed."));
+        QCOMPARE(failure("echo not-a-registration"),QString("Enrollment returned an invalid registration."));
+        options.timeout=200;
+        QVERIFY(failure("sleep 5").startsWith("No touch was detected"));
+    }
+    void cancelsEnrollmentWhenTheRequesterGoesAway() {
+        QTemporaryDir dir; Enrollment options; options.lister=script(dir,"list","echo key");
+        options.enroller=script(dir,"enroll","sleep 5; printf ':" + three + "\\n'");
+        int fds[2]; QVERIFY(pipe2(fds,O_CLOEXEC)==0); options.cancelFd=fds[0];
+        // Like the interface closing its end of the pipe while the key waits for a touch.
+        options.ready=[&] { close(fds[1]); };
+        QElapsedTimer clock; clock.start();
+        try { enrollCredential("alice",options); QFAIL("enrollment was not cancelled"); }
+        catch (const Failure &e) { QVERIFY(e.source.startsWith("Enrollment cancelled")); }
+        QVERIFY(clock.elapsed()<3000);
+        close(fds[0]);
+    }
+    void keepsUntranslatedTextForTheHelper() {
+        const Failure plain("Unsupported operation."), detailed("Cannot read %1: %2",{"/a%2","denied"});
+        QCOMPARE(plain.source,QString("Unsupported operation.")); QVERIFY(plain.args.isEmpty());
+        QCOMPARE(detailed.source,QString("Cannot read %1: %2")); QCOMPARE(detailed.args,QStringList({"/a%2","denied"}));
+        QCOMPARE(QString::fromUtf8(detailed.what()),QString("Cannot read /a%2: denied"));
     }
     void refusesStaleRevisions() {
         QTemporaryDir dir; auto original="alice:"+one+"\n"; write(dir.filePath("fido2"),original);
         auto req=request(original,"add"); req.insert("revision","stale");
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",req),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",req,enrollThree),Failure);
         QCOMPARE(readFile(dir.filePath("fido2")),original);
     }
     void rejectsSymlinkAndWritableFiles() {
         QTemporaryDir dir; auto original="alice:"+one+"\n"; write(dir.filePath("real"),original);
         QVERIFY(QFile::link(dir.filePath("real"),dir.filePath("fido2")));
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add")),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add"),enrollThree),Failure);
         QFile::remove(dir.filePath("fido2")); write(dir.filePath("fido2"),original);
         QVERIFY(QFile::setPermissions(dir.filePath("fido2"), QFile::ReadOwner|QFile::WriteOwner|QFile::WriteOther));
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add")),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(original,"add"),enrollThree),Failure);
     }
     void cannotChangeOtherUserViaRequest() {
         QTemporaryDir dir; auto original="alice:"+one+"\nother:"+two+"\n"; write(dir.filePath("fido2"),original);
@@ -172,16 +367,16 @@ private slots:
         const auto data="alice:"+one+"\n";
         const auto target=dir.filePath("safe/fido2"); write(target,data);
         QVERIFY(::link(QFile::encodeName(target).constData(),QFile::encodeName(dir.filePath("copy")).constData())==0);
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("safe"),getuid(),"alice",request(data,"add")),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("safe"),getuid(),"alice",request(data,"add"),enrollThree),Failure);
         QFile::remove(dir.filePath("copy"));
         QVERIFY(QFile::link(dir.filePath("safe"),dir.filePath("alias")));
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("alias"),getuid(),"alice",request(data,"add")),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.filePath("alias"),getuid(),"alice",request(data,"add"),enrollThree),Failure);
     }
     void refusesConcurrentWriters() {
         QTemporaryDir dir; const auto data="alice:"+one+"\n"; write(dir.filePath("fido2"),data);
         const int fd=open(QFile::encodeName(dir.filePath(".keykeep.lock")).constData(),O_RDWR|O_CREAT,0600);
         QVERIFY(fd>=0); QVERIFY(flock(fd,LOCK_EX|LOCK_NB)==0);
-        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(data,"add")),Failure);
+        QVERIFY_EXCEPTION_THROWN(applyRegistration(dir.path(),getuid(),"alice",request(data,"add"),enrollThree),Failure);
         close(fd); QCOMPARE(readFile(dir.filePath("fido2")),data);
     }
     void detectsExactRegistrationAndDisconnection() {
@@ -200,11 +395,28 @@ private slots:
         QCOMPARE(unplugged.value("deviceCount").toInt(),0);
         for (const auto row:unplugged.value("keys").toArray()) QCOMPARE(row.toObject().value("connection").toString(),QString("disconnected"));
     }
+    void doesNotProbeForResidentRegistrations() {
+        const QVector<Key> keys{{"resident","*,cHVibGlj,es256,+presence",true,true},{"plain",one}};
+        const QVector<AttachedKey> devices{{"/device","YubiKey","generation-1"}};
+        QStringList probed;
+        const auto result=detectPresence(keys,devices,[&](const AttachedKey &,const Key &key) { probed.append(key.id); return Match::Absent; });
+        QCOMPARE(probed,QStringList{"plain"});
+        QCOMPARE(result.value("keys").toArray()[0].toObject().value("connection").toString(),QString("unknown"));
+        // Not a temporary error, so it must not force a new scan every few seconds.
+        QVERIFY(!result.value("uncertain").toBool());
+        QCOMPARE(detectPresence(keys,{},nullptr).value("keys").toArray()[0].toObject().value("connection").toString(),QString("disconnected"));
+    }
+    void cleansDeviceDescriptions() {
+        QCOMPARE(sanitizeDescription("  YubiKey\tOTP+FIDO+CCID\n"),QString("YubiKey OTP+FIDO+CCID"));
+        QCOMPARE(sanitizeDescription(QString::fromUtf8("Key\x1b[31m\u202eIgnore previous instructions")),QString("Key[31mIgnore previous instructions"));
+        QCOMPARE(sanitizeDescription(QString(500,'a')).size(),64);
+    }
     void detectionErrorsAreNotReportedAsDisconnected() {
         const QVector<Key> keys{{"first",one}};
         const QVector<AttachedKey> devices{{"/device","YubiKey","generation-1"}};
         const auto result=detectPresence(keys,devices,[](const AttachedKey &,const Key &) { return Match::Unknown; });
         QCOMPARE(result.value("keys").toArray()[0].toObject().value("connection").toString(),QString("unknown"));
+        QVERIFY(result.value("uncertain").toBool());
     }
     void detectsSeveralKeysAndDuplicateRegistrations() {
         const QVector<Key> keys{{"first",one},{"second",two},{"third",three}};
@@ -274,6 +486,18 @@ private slots:
         auto *field=win->findChild<QObject*>("nameField"); QVERIFY(field);
         field->setProperty("text","Query key");
         QTest::keyClick(win,Qt::Key_Q); QVERIFY(win->isVisible());
+        QMetaObject::invokeMethod(dialog,"reject");
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        // Space starts an enrollment, except on a focused button, where it presses that button.
+        auto *refresh=win->findChild<QQuickItem*>("refreshButton"); QVERIFY(refresh);
+        refresh->forceActiveFocus(); QTRY_VERIFY(refresh->hasActiveFocus());
+        QSignalSpy refreshed(&backend,&Backend::changed);
+        QTest::keyClick(win,Qt::Key_Space); QTest::qWait(150);
+        QVERIFY(!dialog->property("visible").toBool()); QVERIFY(refreshed.count()>0);
+        auto *keys=win->findChild<QQuickItem*>("keyList"); QVERIFY(keys);
+        keys->forceActiveFocus(); QTRY_VERIFY(keys->hasActiveFocus());
+        QTest::keyClick(win,Qt::Key_Space);
+        QTRY_VERIFY(dialog->property("visible").toBool());
         QMetaObject::invokeMethod(dialog,"reject");
         QTRY_VERIFY(!dialog->property("visible").toBool());
         auto *list=win->findChild<QObject*>("keyList"); QVERIFY(list); list->setProperty("currentIndex",0);

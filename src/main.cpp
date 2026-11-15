@@ -19,7 +19,6 @@
 int main(int argc, char **argv) {
     QStringList args;
     for (int i = 1; i < argc; ++i) args << QString::fromLocal8Bit(argv[i]);
-    if (args == QStringList{"--helper"}) { QCoreApplication app(argc,argv); return runHelper(); }
     if (args.value(0) == "--scan" && args.size() <= 2) {
         QCoreApplication app(argc,argv);
         try { QTextStream(stdout) << QJsonDocument(scanPresence(args.value(1))).toJson(QJsonDocument::Compact) << '\n'; return 0; }
@@ -28,7 +27,7 @@ int main(int argc, char **argv) {
     const bool gui = args.isEmpty() || args.first() == "open" || args.first() == "--preview";
     if (!gui) { qputenv("QT_QPA_PLATFORM", "offscreen"); qputenv("QT_QPA_PLATFORMTHEME", "basic"); }
     QGuiApplication app(argc,argv);
-    app.setApplicationName("keymarchy"); app.setApplicationVersion("0.3.1");
+    app.setApplicationName("keymarchy"); app.setApplicationVersion("0.4.0");
     app.setDesktopFileName("keymarchy"); app.setWindowIcon(QIcon::fromTheme("keymarchy"));
     QQuickStyle::setStyle("Material");
     Translator translator; app.installTranslator(&translator);
@@ -42,7 +41,7 @@ int main(int argc, char **argv) {
         } catch (const std::exception &e) { QTextStream(stderr) << e.what() << '\n'; return 1; }
     }
     if (args.contains("--help") || args.contains("-h")) {
-        QTextStream(stdout) << "Keymarchy 0.3.1 — security keys for Omarchy\n"
+        QTextStream(stdout) << "Keymarchy 0.4.0 — security keys for Omarchy\n"
             "  keymarchy open\n  keymarchy list [--json]\n  keymarchy add NAME [--json]\n"
             "  keymarchy rename ID NAME [--json]\n  keymarchy remove ID --yes [--json]\n"
             "  keymarchy skill install\n\nUse full registration IDs from list --json. Add/remove require system authentication.\n";
@@ -60,8 +59,9 @@ int main(int argc, char **argv) {
                 try { keys = applyPresence(keys, scanPresence()); }
                 catch (const std::exception &e) { detectionError = QString::fromUtf8(e.what()); keys = applyPresence(keys, {}); }
             }
-            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"keys",QJsonArray::fromVariantList(keys)},{"problem",backend.problem()},{"detectionError",detectionError}}).toJson();
-            else for (const auto &item : keys) { const auto key=item.toMap(); QTextStream(stdout) << key.value("id").toString() << "  " << key.value("name").toString() << "  [" << key.value("connection").toString() << "]" << '\n'; }
+            if (json) QTextStream(stdout) << QJsonDocument(QJsonObject{{"keys",QJsonArray::fromVariantList(keys)},{"problem",backend.problem()},{"notice",backend.notice()},{"detectionError",detectionError}}).toJson();
+            else for (const auto &item : keys) { const auto key=item.toMap(); QTextStream(stdout) << key.value("id").toString() << "  " << key.value("name").toString() << "  [" << key.value("connection").toString() << "]" << (key.value("touch").toBool() ? "" : "  [no touch required]") << '\n'; }
+            if (!backend.notice().isEmpty()) QTextStream(stderr) << backend.notice() << '\n';
             if (!backend.problem().isEmpty()) { QTextStream(stderr) << backend.problem() << '\n'; return 1; }
             if (!detectionError.isEmpty()) { QTextStream(stderr) << detectionError << '\n'; return 1; }
             return 0;

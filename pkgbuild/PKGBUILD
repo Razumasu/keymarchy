@@ -1,7 +1,7 @@
 # Maintainer: Razu <3963717+Razumasu@users.noreply.github.com>
 
 pkgname=keymarchy
-pkgver=0.3.1
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Manage named FIDO2 security keys for sudo on Omarchy'
 arch=('x86_64' 'aarch64')
@@ -26,6 +26,8 @@ check() {
 package() {
   cd "$startdir/.."
   install -Dm755 build/keymarchy "$pkgdir/usr/bin/keymarchy"
+  install -Dm755 build/helper/keymarchy-helper "$pkgdir/usr/lib/keymarchy/keymarchy-helper"
+  install -Dm644 pkgbuild/io.github.razumasu.keymarchy.policy "$pkgdir/usr/share/polkit-1/actions/io.github.razumasu.keymarchy.policy"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/keymarchy/LICENSE"
   install -Dm644 pkgbuild/keymarchy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/keymarchy.svg"
   install -Dm644 pkgbuild/keymarchy.desktop "$pkgdir/usr/share/applications/keymarchy.desktop"

@@ -11,6 +11,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList keys READ keys NOTIFY changed)
     Q_PROPERTY(QString message READ message NOTIFY changed)
     Q_PROPERTY(QString problem READ problem NOTIFY changed)
+    Q_PROPERTY(QString notice READ notice NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString connectionMessage READ connectionMessage NOTIFY changed)
     Q_PROPERTY(QString phase READ phase NOTIFY changed)
@@ -20,6 +21,7 @@ public:
     QVariantList keys() const { return m_keys; }
     QString message() const { return m_message; }
     QString problem() const { return m_problem; }
+    QString notice() const { return m_notice; }
     bool busy() const { return m_busy; }
     QString connectionMessage() const { return m_connectionMessage; }
     void startMonitoring();
@@ -37,7 +39,7 @@ signals:
 private:
     void start(const QString &program, const QStringList &args, int timeout,
                std::function<void(QByteArray)> done, const QByteArray &input = {});
-    void save(const QJsonObject &request, std::function<void()> after);
+    void privileged(const QString &action, const QJsonObject &request, std::function<void(const QJsonObject &)> after);
     void finish(bool success, const QString &message);
     QJsonObject labels() const;
     void saveLabel(const QString &id, const QString &name);
@@ -47,7 +49,7 @@ private:
     void detectionFailed(const QString &message);
     bool m_demo = false, m_busy = false;
     QVariantList m_keys;
-    QString m_message, m_problem, m_revision, m_phase;
+    QString m_message, m_problem, m_notice, m_revision, m_phase;
     QProcess *m_process = nullptr;
     QTimer m_timeout;
     QString m_labelPath;

@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-mkdir -p "$ROOT/build"
+mkdir -p "$ROOT/build/helper"
 cd "$ROOT/build"
 qmake6 "$ROOT/keymarchy.pro"
+make -j"$(nproc)"
+cd "$ROOT/build/helper"
+qmake6 "$ROOT/keymarchy-helper.pro"
 make -j"$(nproc)"

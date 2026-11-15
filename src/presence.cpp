@@ -90,9 +90,20 @@ static Match probeDevice(const AttachedKey &device, const Key &key) {
         return verify(assertion, fields) ? Match::Present : Match::Unknown;
     } catch (const std::exception &) { return Match::Unknown; }
 }
+QString sanitizeDescription(const QString &raw) {
+    QString clean;
+    for (const auto c : raw.simplified()) if (c.isPrint() && clean.size() < 64) clean += c;
+    return clean.trimmed();
+}
 QJsonObject detectPresence(const QVector<Key> &keys, const QVector<AttachedKey> &devices, const Probe &probe) {
     QJsonArray registrations;
+    bool retry = false;
     for (const auto &key : keys) {
+        if (key.resident) {
+            // A resident registration stores no key handle, so there is nothing to look for silently.
+            registrations.append(QJsonObject{{"id", key.id}, {"connection", devices.isEmpty() ? "disconnected" : "unknown"}, {"devices", QJsonArray()}});
+            continue;
+        }
         bool uncertain = false;
         QJsonArray matches;
         for (const auto &device : devices) {
@@ -100,9 +111,10 @@ QJsonObject detectPresence(const QVector<Key> &keys, const QVector<AttachedKey> 
             if (match == Match::Present) matches.append(device.description);
             if (match == Match::Unknown) uncertain = true;
         }
+        retry |= matches.isEmpty() && uncertain;
         registrations.append(QJsonObject{{"id", key.id}, {"connection", !matches.isEmpty() ? "connected" : uncertain ? "unknown" : "disconnected"}, {"devices", matches}});
     }
-    return {{"keys",registrations},{"deviceCount",devices.size()}};
+    return {{"keys",registrations},{"deviceCount",devices.size()},{"uncertain",retry}};
 }
 QJsonObject scanPresence(const QString &cachedToken) {
     const auto configuration = checkConfiguration();
@@ -121,7 +133,7 @@ QJsonObject scanPresence(const QString &cachedToken) {
     for (size_t i = 0; i < count; ++i) {
         const auto *info = fido_dev_info_ptr(list, i);
         const auto path = QString::fromLocal8Bit(fido_dev_info_path(info));
-        auto description = QString::fromUtf8(fido_dev_info_product_string(info));
+        auto description = sanitizeDescription(QString::fromUtf8(fido_dev_info_product_string(info)));
         if (description.isEmpty()) description = appText("Security key");
         struct stat st{};
         if (stat(QFile::encodeName(path).constData(), &st) != 0) throw Failure(appText("A security key changed during detection. Retrying…"));
@@ -133,10 +145,8 @@ QJsonObject scanPresence(const QString &cachedToken) {
     const auto token = Registry::fingerprint(registry.revision().toLatin1() + QSysInfo::machineHostName().toUtf8() + QJsonDocument(identities).toJson(QJsonDocument::Compact));
     if (token == cachedToken) return {{"unchanged",true},{"token",token},{"revision",registry.revision()}};
     auto result = detectPresence(registry.keys(), devices, probeDevice);
-    bool uncertain = false;
-    for (const auto &row : result.value("keys").toArray()) uncertain |= row.toObject().value("connection") == "unknown";
     // Retry temporary access/transport errors instead of caching them as absence.
-    result.insert("token", uncertain ? QString() : token);
+    result.insert("token", result.take("uncertain").toBool() ? QString() : token);
     result.insert("revision",registry.revision());
     return result;
 }

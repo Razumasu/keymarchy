@@ -32,8 +32,8 @@ available, use the source installation above.
 
 ## Use
 
-- **Add key:** connect only the key to enroll, choose a name, touch it when it
-  flashes, and approve the system authentication prompt to save it.
+- **Add key:** connect only the key to enroll, choose a name, approve the system
+  authentication prompt, and touch the key when it flashes.
 - **Identify and rename:** plug in a key. Its registration shows **Connected**
   and is highlighted automatically, usually within three seconds. Use Rename
   to give it a name such as Everyday, Travel, or Backup at home. Unplug it and
@@ -48,18 +48,29 @@ If FIDO2 has never been configured, first enroll a key through Omarchy's
 The supported sudo authentication stack is `pam_u2f.so` marked `sufficient`,
 followed by `auth include system-auth`, with no additional authentication rules.
 Custom rule order, origins, authfile paths, and pam-u2f defaults are rejected.
+`/etc/pam.d/polkit-1` must follow the same pattern, or use only
+`auth include system-auth` for authentication. Custom authentication includes
+and substacks are rejected, even when they do not mention pam-u2f directly.
+Other PAM services that read the registration file are listed as a notice;
+Keymarchy does not check their rules.
 This configuration check cannot verify your password or the included
 `system-auth` policy; test password authentication before removing your last key.
 
 Existing registrations have no device name or serial number. They initially
 appear as Key 1, Key 2, etc., in file order, with a stable registration fingerprint.
 Those generated numbers can change after removal; assign names before relying
-on them. A fingerprint identifies a *registration*, not a physical device.
+on them. A registration marked **No touch required** unlocks sudo while its key
+  is merely plugged in; Keymarchy never creates one, so remove it unless you added
+  it on purpose. A fingerprint identifies a *registration*, not a physical device.
 The same physical key can have multiple registrations; all matching entries
 are highlighted when it is connected. Multiple connected keys are supported.
 If none match, the app reports an unregistered key. If a key cannot be queried
 (for example, because it requires verification or another app is using it),
 the app shows an unknown state rather than claiming it is disconnected.
+
+Resident (discoverable) registrations made with `pamu2fcfg -r` can be named and
+removed, but not detected as connected. A key that asks for its PIN during
+enrollment cannot be added yet.
 
 Adding a key enrolls it; it is not a sudo authentication test. To verify it,
 leave only that key connected and run `sudo -k -v`, then touch it when prompted.
@@ -78,9 +89,11 @@ keymarchy remove FULL_REGISTRATION_ID --yes --json
 ```
 
 The `list` output includes `connection` (`connected`, `disconnected`, or `unknown`)
-and matching device descriptions. Use the full ID returned by `list`. Commands run without a display; saving an
-addition or removal invokes `pkexec`, which may use a graphical authentication
-agent or a terminal prompt. Run as your regular user. Exit status is 0 on success,
+and matching device descriptions, `touch` (false when sudo does not ask for a
+touch), and a `notice` with warnings that do not block changes. Use the full ID
+returned by `list`. Commands run without a display; an addition or removal
+invokes `pkexec`, which may use a graphical authentication agent or a terminal
+prompt. Run as your regular user. Exit status is 0 on success,
 1 on failure. With `--json`, stdout contains JSON and progress/errors go to stderr.
 
 `keymarchy skill install` installs the bundled agent instructions under
@@ -99,19 +112,30 @@ agent or a terminal prompt. Run as your regular user. Exit status is 0 on succes
 | Q | Quit |
 
 Typing in a dialog does not activate these shortcuts. The window stays open
-while an operation is in progress. Enrollment can be cancelled before saving;
-close the system authentication prompt to decline a save.
+while an operation is in progress. Close the system authentication prompt to
+decline a change. While the key waits for a touch, Cancel asks the helper to
+stop; Keymarchy then reports whether the key was added or not.
 
 ## Storage and recovery
 
-The GUI runs unprivileged. Only `/usr/bin/keymarchy --helper`, launched through
-`pkexec`, writes the registration file. It derives the requesting user from
+The GUI runs unprivileged. Only `/usr/lib/keymarchy/keymarchy-helper`, a small
+separate program launched through `pkexec`, writes the registration file. Adding
+and removing are separate polkit actions with their own prompts, and each change
+needs a new authentication. The helper derives the requesting user from
 `PKEXEC_UID`, restricts edits to that user's row, checks ownership and file types,
 locks concurrent Keymarchy changes, rejects stale revisions, and writes atomically.
 It neither edits PAM nor grants new sudo privileges.
 
+The helper does not accept a registration from whoever calls it. After you
+authenticate, it enrolls the connected key itself and saves only what that
+enrollment returns, always requiring a touch for sudo. A program running as you
+can raise the prompt, but it cannot add a key of its own choosing: the key has
+to be plugged into this computer and touched.
+
 Each successful addition or removal creates a root-only backup named
-`/etc/fido2/fido2.backup.XXXXXX`. The backup path appears after saving. Restoring
+`/etc/fido2/fido2.backup.XXXXXX`. The current operation's backup and the nine
+newest other backups are kept, even if the system clock has moved backwards.
+The backup path appears after saving. Restoring
 one restores the *entire* mapping file, including other users and keys, so an
 administrator should inspect it before replacing the current file.
 
